@@ -1,0 +1,6 @@
+2026-04-21 19:59:05,076 [INFO] Procesando carpeta: facturas
+2026-04-21 19:59:06,113 [INFO] OK  3a8d4633c53b428257595ae2c85a1acff592fdde91a1d7cd295d24a140c5a89ce2e2bde6fa8aa1e8b6d579c0577be35d DIG.pdf → Factura Electrónica | Total: 1189915.13
+2026-04-21 19:59:06,841 [INFO] OK  e69f8d36deea2d8f39bc4bc0e9373b55960dc0511cefeb468ac9fecf8616cc26c108ec8a3d2fa46d29382c61048c795a DIG.pdf → Factura Electrónica | Total: 399681.0
+2026-04-21 19:59:06,857 [INFO] Validación: 0 OK | 2 ERROR
+2026-04-21 19:59:06,876 [WARNING] Ingresos no proporcionados — prorrateo al 100%
+2026-04-21 19:59:06,951 [INFO] Excel generado: output\facturas_20260421_195906.xlsx
