@@ -19,11 +19,14 @@ env/
 
 # ── Facturas y datos fiscales (documentos privados) ───────────────────────────
 facturas/
+*.pdf
+*.xml
 
-# ── Archivos generados ────────────────────────────────────────────────────────
+# ── Archivos generados / Excel ────────────────────────────────────────────────
 output/
 logs/
 *.xlsx
+*.xls
 *.log
 
 # ── Streamlit ─────────────────────────────────────────────────────────────────

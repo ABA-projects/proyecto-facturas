@@ -43,10 +43,12 @@ python main.py --carpeta C:/mis-facturas --ingresos "2026-04:5000000"
 ### 3. Dashboard visual (Streamlit)
 
 ```bash
-streamlit run app.py
+python -m streamlit run app.py
 ```
 
 Abre `http://localhost:8501` en el navegador. Permite subir archivos, ver métricas y descargar el Excel.
+
+> **Nota Windows:** si `streamlit` no se reconoce como comando, usa siempre `python -m streamlit run app.py`.
 
 ---
 
@@ -111,6 +113,31 @@ proyecto-facturas/
 | `nombre_receptor` | "Nombre o Razón Social: ..." | `PartyLegalEntity/RegistrationName` |
 | `fecha` | "Fecha de Emisión: 24/03/2026" | `cbc:IssueDate` |
 | `cufe` | "CUFE: abc123..." (96 hex) | `cbc:UUID` |
+| `subtotal` | "Total Bruto Factura" (después de descuentos) | `LegalMonetaryTotal/TaxExclusiveAmount` |
+| `iva_19` | "IVA 19% …" o línea "IVA …" del resumen | `TaxTotal` con `Percent = 19` |
+| `iva_5` | "IVA 5% …" del resumen | `TaxTotal` con `Percent = 5` |
+| `total` | "Total factura (=) COP $ …" | `LegalMonetaryTotal/PayableAmount` |
+
+### Lógica de extracción de montos (PDF)
+
+El extractor busca los campos en este orden de prioridad:
+
+**Subtotal** (base gravable para IVA):
+1. `Total Bruto Factura` — suma después de descuentos de línea, antes de impuestos ✓
+2. `Base gravable` / `Base imponible`
+3. `Subtotal` — fallback (es la suma bruta *antes* de descuentos; puede diferir)
+
+**IVA 19%:**
+1. `IVA 19%` — cuando aparece con el porcentaje explícito
+2. `Impuesto 19`
+3. `IVA` — línea del resumen de totales (sin porcentaje)
+
+**Total:**
+1. `Total factura` — maneja prefijos `(=)`, espacios unicode y `COP $`
+2. `Total neto factura`
+3. `Total a pagar` / `Valor total`
+
+> El cuadre contable es: `subtotal + iva_19 + iva_5 = total` (tolerancia ±$1 COP).
 
 ---
 

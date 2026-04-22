@@ -208,8 +208,15 @@ def extract_xml(path: Path) -> dict:
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _search_money_near(text: str, label: str) -> float:
-    """Busca el valor monetario más cercano a una etiqueta."""
-    pattern = re.compile(rf"{re.escape(label)}[:\s]*([\d.,]+)", re.I)
+    """
+    Busca el valor monetario en la misma línea que la etiqueta.
+    Usa [^\\d\\n]{0,60} para saltar texto no-numérico (paréntesis, COP, $, espacios
+    unicode como ㅤ) entre la etiqueta y el número.
+    """
+    pattern = re.compile(
+        rf"^[^\n]*{re.escape(label)}[^\d\n]{{0,60}}([\d][\d.,]*)",
+        re.I | re.MULTILINE,
+    )
     m = pattern.search(text)
     if m:
         return _clean_number(m.group(1))
@@ -287,22 +294,34 @@ def extract_pdf(path: Path) -> dict:
             nit_receptor = nits[1]
 
     # ── Montos ─────────────────────────────────────────────────────────────
+    # Subtotal = base gravable DESPUÉS de descuentos de línea (= TaxExclusiveAmount en XML)
+    # "Total Bruto Factura" es el campo correcto en la representación gráfica DIAN estándar.
+    # "Subtotal" sería la suma bruta ANTES de descuentos → incorrecto para prorrateo IVA.
     subtotal = (
-        _search_money_near(text, "subtotal")
+        _search_money_near(text, "Total Bruto Factura")
         or _search_money_near(text, "base gravable")
         or _search_money_near(text, "base imponible")
+        or _search_money_near(text, "subtotal")
     )
+    # IVA 19%: busca línea específica "IVA 19% …" o la línea "IVA …" del resumen de totales.
+    # No se usa "iva" genérico solo porque la columna "IVA %" de los detalles tiene "19.00"
+    # (el porcentaje) en líneas separadas, y el patrón con MULTILINE no los confunde.
     iva19 = (
         _search_money_near(text, "IVA 19%")
         or _search_money_near(text, "impuesto 19")
-        or _search_money_near(text, "iva")
+        or _search_money_near(text, "IVA")
     )
-    iva5  = _search_money_near(text, "IVA 5%") or _search_money_near(text, "impuesto 5")
+    iva5 = (
+        _search_money_near(text, "IVA 5%")
+        or _search_money_near(text, "impuesto 5")
+    )
+    # Total: "Total factura (=) ㅤ COP $ 1.191.999,83" — el nuevo _search_money_near
+    # maneja espacios unicode y el prefijo "COP $" con [^\d\n]{0,60}.
     total = (
-        _search_money_near(text, "total factura")
+        _search_money_near(text, "Total factura")
+        or _search_money_near(text, "Total neto factura")
         or _search_money_near(text, "total a pagar")
         or _search_money_near(text, "valor total")
-        or _search_money_near(text, "total")
     )
 
     sign = -1 if doc_type == "Nota Crédito" else 1
