@@ -11,6 +11,16 @@ import pdfplumber
 
 logger = logging.getLogger(__name__)
 
+# ── Autorretenedores (DIAN, corte 25/02/2026) ──────────────────────────────
+_AUTORRETENEDORES_FILE = Path(__file__).parent / "autorretenedores.txt"
+try:
+    _AUTORRETENEDORES: frozenset[str] = frozenset(
+        _AUTORRETENEDORES_FILE.read_text(encoding="utf-8").splitlines()
+    )
+except FileNotFoundError:
+    _AUTORRETENEDORES = frozenset()
+    logger.warning("autorretenedores.txt no encontrado — retención se calculará para todos")
+
 # ── Namespaces UBL usados por DIAN ─────────────────────────────────────────
 NS = {
     "cac": "urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2",
@@ -109,6 +119,31 @@ def _detect_doc_type(text: str, filename: str) -> str:
     return "Factura Electrónica"
 
 
+def _calc_retencion(subtotal: float, nit_emisor: str) -> float:
+    """Retención en la fuente = subtotal × 2.5%. Cero si el emisor es autorretenedor."""
+    if nit_emisor.strip() in _AUTORRETENEDORES:
+        return 0.0
+    return round(subtotal * 0.025, 2)
+
+
+def _split_iva_bases(subtotal: float, iva19: float, iva5: float,
+                     base19_direct: float = 0.0, base5_direct: float = 0.0
+                     ) -> tuple[float, float, float]:
+    """
+    Devuelve (base_iva_19, base_iva_5, no_gravado).
+    Si se pasan base19_direct/base5_direct (del XML TaxableAmount) se usan directamente.
+    Para PDF se back-calcula desde el monto de IVA.
+    no_gravado = subtotal - base_iva_19 - base_iva_5, mínimo 0.
+    """
+    s = abs(subtotal)
+    b19 = base19_direct if base19_direct else (round(iva19 / 0.19, 2) if iva19 else 0.0)
+    b5  = base5_direct  if base5_direct  else (round(iva5  / 0.05, 2) if iva5  else 0.0)
+    b19 = min(round(b19, 2), s)
+    b5  = min(round(b5,  2), max(0.0, s - b19))
+    no_grav = max(0.0, round(s - b19 - b5, 2))
+    return b19, b5, no_grav
+
+
 def _clean_name(raw: str) -> str:
     """Limpia un nombre: recorta en etiquetas adyacentes y limita longitud."""
     raw = raw.strip()
@@ -165,16 +200,22 @@ def extract_xml(path: Path) -> dict:
     subtotal = 0.0
     iva19 = 0.0
     iva5  = 0.0
+    base19_xml = 0.0
+    base5_xml  = 0.0
 
     for tax in root.findall(".//cac:TaxTotal", NS):
         amount_el = tax.find("cbc:TaxAmount", NS)
         amount = float(amount_el.text) if amount_el is not None and amount_el.text else 0.0
         percent_el = tax.find(".//cac:TaxSubtotal/cbc:Percent", NS)
         pct = float(percent_el.text) if percent_el is not None and percent_el.text else 0.0
+        taxable_el = tax.find(".//cac:TaxSubtotal/cbc:TaxableAmount", NS)
+        taxable = float(taxable_el.text) if taxable_el is not None and taxable_el.text else 0.0
         if abs(pct - 19) < 0.5:
             iva19 += amount
+            base19_xml += taxable
         elif abs(pct - 5) < 0.5:
             iva5 += amount
+            base5_xml += taxable
 
     le = root.find("cac:LegalMonetaryTotal", NS)
     if le is not None:
@@ -184,22 +225,33 @@ def extract_xml(path: Path) -> dict:
         total = 0.0
 
     sign = -1 if doc_type == "Nota Crédito" else 1
+    subtotal_signed = round(sign * subtotal, 2)
+    iva19_signed = round(sign * iva19, 2)
+    iva5_signed  = round(sign * iva5,  2)
+    base19, base5, no_grav = _split_iva_bases(
+        subtotal_signed, abs(iva19_signed), abs(iva5_signed),
+        base19_direct=base19_xml, base5_direct=base5_xml,
+    )
 
     return {
-        "archivo":         path.name,
-        "tipo":            doc_type,
-        "cufe":            cufe,
-        "folio":           folio,
-        "fecha":           _parse_date(fecha),
-        "nit_emisor":      nit_emisor,
-        "nombre_emisor":   nom_emisor,
-        "nit_receptor":    nit_receptor,
-        "nombre_receptor": nom_receptor,
-        "subtotal":        round(sign * subtotal, 2),
-        "iva_19":          round(sign * iva19, 2),
-        "iva_5":           round(sign * iva5, 2),
-        "total":           round(sign * total, 2),
-        "fuente":          "XML",
+        "archivo":           path.name,
+        "tipo":              doc_type,
+        "cufe":              cufe,
+        "folio":             folio,
+        "fecha":             _parse_date(fecha),
+        "nit_emisor":        nit_emisor,
+        "nombre_emisor":     nom_emisor,
+        "nit_receptor":      nit_receptor,
+        "nombre_receptor":   nom_receptor,
+        "subtotal":          subtotal_signed,
+        "base_iva_19":       base19,
+        "iva_19":            iva19_signed,
+        "base_iva_5":        base5,
+        "iva_5":             iva5_signed,
+        "no_gravado":        no_grav,
+        "total":             round(sign * total, 2),
+        "retencion_fuente":  _calc_retencion(abs(subtotal_signed), nit_emisor),
+        "fuente":            "XML",
     }
 
 
@@ -207,14 +259,15 @@ def extract_xml(path: Path) -> dict:
 # PDF
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _search_money_near(text: str, label: str) -> float:
+def _search_money_near(text: str, label: str, line_start: bool = False) -> float:
     """
     Busca el valor monetario en la misma línea que la etiqueta.
-    Usa [^\\d\\n]{0,60} para saltar texto no-numérico (paréntesis, COP, $, espacios
-    unicode como ㅤ) entre la etiqueta y el número.
+    line_start=True requiere que la etiqueta esté al inicio de la línea
+    (con espacios opcionales), evitando falsos positivos mid-line.
     """
+    prefix = r"^\s*" if line_start else r"^[^\n]*"
     pattern = re.compile(
-        rf"^[^\n]*{re.escape(label)}[^\d\n]{{0,60}}([\d][\d.,]*)",
+        rf"{prefix}{re.escape(label)}[^\d\n]{{0,60}}([\d][\d.,]*)",
         re.I | re.MULTILINE,
     )
     m = pattern.search(text)
@@ -309,7 +362,7 @@ def extract_pdf(path: Path) -> dict:
     iva19 = (
         _search_money_near(text, "IVA 19%")
         or _search_money_near(text, "impuesto 19")
-        or _search_money_near(text, "IVA")
+        or _search_money_near(text, "IVA", line_start=True)
     )
     iva5 = (
         _search_money_near(text, "IVA 5%")
@@ -325,22 +378,32 @@ def extract_pdf(path: Path) -> dict:
     )
 
     sign = -1 if doc_type == "Nota Crédito" else 1
+    subtotal_signed = round(sign * subtotal, 2)
+    iva19_signed = round(sign * iva19, 2)
+    iva5_signed  = round(sign * iva5,  2)
+    base19, base5, no_grav = _split_iva_bases(
+        subtotal_signed, abs(iva19_signed), abs(iva5_signed),
+    )
 
     return {
-        "archivo":         path.name,
-        "tipo":            doc_type,
-        "cufe":            cufe,
-        "folio":           folio,
-        "fecha":           fecha,
-        "nit_emisor":      nit_emisor,
-        "nombre_emisor":   nom_emisor,
-        "nit_receptor":    nit_receptor,
-        "nombre_receptor": nom_receptor,
-        "subtotal":        round(sign * subtotal, 2),
-        "iva_19":          round(sign * iva19, 2),
-        "iva_5":           round(sign * iva5, 2),
-        "total":           round(sign * total, 2),
-        "fuente":          "PDF",
+        "archivo":           path.name,
+        "tipo":              doc_type,
+        "cufe":              cufe,
+        "folio":             folio,
+        "fecha":             fecha,
+        "nit_emisor":        nit_emisor,
+        "nombre_emisor":     nom_emisor,
+        "nit_receptor":      nit_receptor,
+        "nombre_receptor":   nom_receptor,
+        "subtotal":          subtotal_signed,
+        "base_iva_19":       base19,
+        "iva_19":            iva19_signed,
+        "base_iva_5":        base5,
+        "iva_5":             iva5_signed,
+        "no_gravado":        no_grav,
+        "total":             round(sign * total, 2),
+        "retencion_fuente":  _calc_retencion(abs(subtotal_signed), nit_emisor),
+        "fuente":            "PDF",
     }
 
 
@@ -349,7 +412,11 @@ def _empty_row(filename: str, error: str) -> dict:
         "archivo": filename, "tipo": "ERROR", "cufe": "", "folio": "",
         "fecha": "", "nit_emisor": "", "nombre_emisor": "",
         "nit_receptor": "", "nombre_receptor": "",
-        "subtotal": 0.0, "iva_19": 0.0, "iva_5": 0.0, "total": 0.0,
+        "subtotal": 0.0,
+        "base_iva_19": 0.0, "iva_19": 0.0,
+        "base_iva_5":  0.0, "iva_5":  0.0,
+        "no_gravado":  0.0,
+        "total": 0.0, "retencion_fuente": 0.0,
         "fuente": f"ERROR: {error}",
     }
 

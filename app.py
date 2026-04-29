@@ -102,9 +102,10 @@ if uploaded and st.button("⚙️ Procesar facturas", type="primary"):
 
         # ── Descarga Excel ─────────────────────────────────────────────
         cols_base = [
-            "archivo", "tipo", "cufe", "folio", "fecha",
+            "tipo", "cufe", "folio", "fecha",
             "nit_emisor", "nombre_emisor", "nit_receptor", "nombre_receptor",
-            "subtotal", "iva_19", "iva_5", "total", "fuente",
+            "subtotal", "base_iva_19", "iva_19", "base_iva_5", "iva_5",
+            "no_gravado", "total", "retencion_fuente", "fuente",
         ]
         df_base = df[[c for c in cols_base if c in df.columns]]
 

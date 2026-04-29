@@ -49,7 +49,10 @@ def write_excel(
     output_path: Path,
 ):
     """Escribe las 3 hojas en output_path."""
-    money_base = ["subtotal", "iva_19", "iva_5", "total"]
+    money_base = [
+        "subtotal", "base_iva_19", "iva_19", "base_iva_5", "iva_5",
+        "no_gravado", "total", "retencion_fuente",
+    ]
     money_val  = ["total"]
     money_pror = [
         "iva_total", "iva_mandatos", "iva_base_prorateo",
