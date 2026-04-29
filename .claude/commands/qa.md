@@ -17,7 +17,7 @@ Actúa como QA Engineer especializado en validación de extracción de documento
 - PDFs con texto escaneado (OCR): debe fallar limpiamente con _empty_row
 
 **2. Subcarpetas y detección de fecha por carpeta**
-- Archivo en `facturas/2026-03/FE-001.pdf` → campo `archivo` muestra `2026-03/FE-001.pdf`
+- Archivo en `facturas/2026-03/FE-001.pdf` → se procesa correctamente; fecha inferida de carpeta si el documento no tiene fecha propia
 - Archivo sin fecha extraíble en carpeta `2026-03/` → fecha = `2026-03-01`
 - Archivo sin fecha en carpeta sin fecha → fecha vacía (no falla)
 - Mismo nombre de archivo en dos subcarpetas distintas → se procesan ambos (no se deduplica por stem)

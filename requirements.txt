@@ -6,3 +6,4 @@ streamlit>=1.36.0
 watchdog>=4.0.0
 pytest>=8.0.0
 pytest-cov>=5.0.0
+groq>=0.11
