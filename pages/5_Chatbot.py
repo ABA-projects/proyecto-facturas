@@ -6,7 +6,7 @@ from services.chatbot import responder
 st.set_page_config(page_title="Chatbot · Facturas DIAN", page_icon="🤖", layout="wide")
 
 st.title("🤖 Accounting Assistant")
-st.caption("Pregunta sobre tus facturas en lenguaje natural · Powered by Groq llama-3.3-70b")
+st.caption("Asistente contable colombiano · Powered by Groq llama-3.3-70b · Gratuito")
 
 # ── Inicializar historial ─────────────────────────────────────────────────────
 if "messages" not in st.session_state:
@@ -14,24 +14,43 @@ if "messages" not in st.session_state:
 
 # ── Estado de datos ───────────────────────────────────────────────────────────
 tiene_datos = st.session_state.get("processed") and st.session_state.get("df_base") is not None
+df = st.session_state.get("df_base") if tiene_datos else None
 
-if not tiene_datos:
-    st.info("El asistente puede responder preguntas generales sobre facturación DIAN. "
-            "Para consultas sobre tus facturas específicas, procésalas primero en ⚙️ Procesar.")
-    col1, _ = st.columns([1, 3])
-    with col1:
-        if st.button("⚙️ Ir a Procesar"):
-            st.switch_page("pages/1_Procesar.py")
+# Banner contextual — informativo, no bloqueante
+if tiene_datos:
+    total = len(df)
+    errores = int((df.get("validacion", "") == "ERROR").sum()) if "validacion" in df.columns else 0
+    st.success(
+        f"📂 {total} facturas cargadas en sesión · {errores} errores — "
+        "puedo consultar estos datos además de responder preguntas generales."
+    )
+else:
+    st.info(
+        "💬 Puedo responder preguntas de contabilidad, IVA, retención, DIAN y normativa colombiana. "
+        "Si procesas facturas en ⚙️ Procesar, también podré analizarlas directamente."
+    )
 
-# ── Sugerencias rápidas ───────────────────────────────────────────────────────
-if tiene_datos and not st.session_state.messages:
+st.divider()
+
+# ── Sugerencias rápidas (cambian según contexto) ──────────────────────────────
+if not st.session_state.messages:
     st.markdown("**Preguntas frecuentes:**")
-    sugerencias = [
-        "¿Cuánto IVA pagué este mes?",
-        "¿Cuáles son mis 5 mayores proveedores?",
-        "¿Qué facturas tienen errores?",
-        "Dame un resumen general",
-    ]
+
+    if tiene_datos:
+        sugerencias = [
+            "¿Cuánto IVA pagué este mes?",
+            "¿Cuáles son mis 5 mayores proveedores?",
+            "¿Qué facturas tienen errores?",
+            "Dame un resumen general",
+        ]
+    else:
+        sugerencias = [
+            "¿Qué es el prorrateo de IVA Art. 490 ET?",
+            "¿Cuándo aplica retención en la fuente?",
+            "¿Cuál es la diferencia entre CUFE y CUDE?",
+            "¿Qué documentos generan IVA descontable?",
+        ]
+
     cols = st.columns(len(sugerencias))
     for col, sug in zip(cols, sugerencias):
         with col:
@@ -43,9 +62,9 @@ for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# ── Input (sugerencia o texto libre) ─────────────────────────────────────────
+# ── Input ─────────────────────────────────────────────────────────────────────
 sugerencia_pendiente = st.session_state.pop("_sugerencia", None)
-prompt = st.chat_input("Pregunta sobre tus facturas…") or sugerencia_pendiente
+prompt = st.chat_input("Pregunta algo sobre contabilidad o tus facturas…") or sugerencia_pendiente
 
 if prompt:
     st.session_state.messages.append({"role": "user", "content": prompt})
@@ -58,14 +77,13 @@ if prompt:
                 {"role": m["role"], "content": m["content"]}
                 for m in st.session_state.messages[:-1]
             ]
-            df = st.session_state.df_base if tiene_datos else None
             respuesta = responder(prompt=prompt, df=df, historial=historial_previo)
         st.markdown(respuesta)
 
     st.session_state.messages.append({"role": "assistant", "content": respuesta})
 
-# ── Botón limpiar historial ───────────────────────────────────────────────────
+# ── Limpiar ───────────────────────────────────────────────────────────────────
 if st.session_state.messages:
-    if st.button("🗑️ Limpiar conversación", key="clear_chat"):
+    if st.button("🗑️ Limpiar conversación"):
         st.session_state.messages = []
         st.rerun()
