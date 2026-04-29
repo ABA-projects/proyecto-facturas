@@ -28,13 +28,13 @@ NS = {
     "ext": "urn:oasis:names:specification:ubl:schema:xsd:CommonExtensionComponents-2",
 }
 
-# ── Patrones regex para PDF ─────────────────────────────────────────────────
-_RE_CUFE  = re.compile(r"CUFE[:\s]+([a-f0-9]{96})", re.I)
-_RE_CUDE  = re.compile(r"CUDE[:\s]+([a-f0-9]{96})", re.I)
-_RE_DATE  = re.compile(r"(\d{4}-\d{2}-\d{2}|\d{2}/\d{2}/\d{4}|\d{2}-\d{2}-\d{4})")
-_RE_MONEY = re.compile(r"[\$]?\s*([\d.,]+)")
+# ── Patrones regex ──────────────────────────────────────────────────────────
+_RE_CUFE = re.compile(r"CUFE[:\s]+([a-f0-9]{96})", re.I)
+_RE_CUDE = re.compile(r"CUDE[:\s]+([a-f0-9]{96})", re.I)
+_RE_DATE = re.compile(r"(\d{4}-\d{2}-\d{2}|\d{2}/\d{2}/\d{4}|\d{2}-\d{2}-\d{4})")
 
-# Folio: prioridad "Número de Factura:" (DIAN estándar), luego genérico
+# ── Folio ──────────────────────────────────────────────────────────────────
+# Facturas y notas: "Número de Factura: FE-001"
 _RE_FOLIO = re.compile(
     r"n[uú]mero\s+de\s+(?:la\s+)?factura\s*[:\s]+([A-Z0-9][A-Z0-9\-]+)"
     r"|n[uú]mero\s+factura\s*[:\s]+([A-Z0-9][A-Z0-9\-]+)"
@@ -42,18 +42,46 @@ _RE_FOLIO = re.compile(
     r"|factura\s+(?:n[uú]m\.?|n[uú]mero|no\.?|nro\.?)\s*[:\s#]+([A-Z0-9][A-Z0-9\-]+)",
     re.I,
 )
+# Documentos equivalentes/soporte: "Número de documento: POSE5217"
+# Solo captura si empieza con letra (NITs son solo dígitos)
+_RE_FOLIO_DOC = re.compile(
+    r"n[uú]mero\s+de\s+documento\s*[:\s]+([A-Za-z][A-Z0-9a-z\-]+)",
+    re.I,
+)
 
-# Emisor / Vendedor — etiquetas estándar representación gráfica DIAN
+# ── Emisor — etiquetas DIAN estándar ───────────────────────────────────────
 _RE_EMISOR_NIT    = re.compile(r"nit\s+del\s+emisor\s*[:\s]+([0-9]{6,12})", re.I)
 _RE_EMISOR_NOMBRE = re.compile(r"raz[oó]n\s+social\s*[:\s]+([^\n\r]+)", re.I)
 
-# Receptor / Comprador — etiquetas estándar representación gráfica DIAN
-_RE_RECEPTOR_NIT    = re.compile(
+# Documento Equivalente POS: emisor está en "Datos del vendedor" (segunda sección)
+_RE_VENDEDOR_NOMBRE = re.compile(
+    r"datos\s+del\s+vendedor.{0,300}?raz[oó]n\s+social\s*[:\s]+([^\n\r]+)",
+    re.I | re.DOTALL,
+)
+_RE_VENDEDOR_NIT = re.compile(
+    r"datos\s+del\s+vendedor.{0,500}?n[uú]mero\s+de\s+documento\s*[:\s]+([0-9]{6,12})",
+    re.I | re.DOTALL,
+)
+
+# ── Receptor — etiquetas DIAN estándar ────────────────────────────────────
+_RE_RECEPTOR_NIT = re.compile(
     r"n[uú]mero\s+(?:de\s+)?documento\s*[:\s]+([0-9]{6,12})"
     r"|nit\s+(?:del\s+)?(?:adquir|comprador|receptor|cliente)[^\n]{0,30}?([0-9]{6,12})",
     re.I,
 )
 _RE_RECEPTOR_NOMBRE = re.compile(r"nombre\s+o\s+raz[oó]n\s+social\s*[:\s]+([^\n\r]+)", re.I)
+
+# "NIT del adquiriente:" (Documento Equivalente POS)
+# "adquiriente" tiene "iente" — se necesita i?ente para cubrir ambas grafías
+_RE_ADQUIRIENTE_NIT = re.compile(
+    r"nit\s+del\s+adquiri?ente\s*[:\s]+([0-9]{6,12})",
+    re.I,
+)
+# "Razón social:" en sección adquiriente (Doc Equivalente / Soporte)
+_RE_ADQUIRIENTE_NOMBRE = re.compile(
+    r"datos\s+del\s+adquir.{0,300}?raz[oó]n\s+social\s*[:\s]+([^\n\r]+)",
+    re.I | re.DOTALL,
+)
 
 # NIT genérico (fallback)
 _RE_NIT_GENERICO = re.compile(r"NIT[:\s#.]*([0-9]{6,12})", re.I)
@@ -110,12 +138,17 @@ def _date_from_folder(path: Path) -> str:
 
 def _detect_doc_type(text: str, filename: str) -> str:
     tl = (text + filename).lower()
-    if "nota cr" in tl or "note credit" in tl:
+    stem = Path(filename).stem.lower()
+    if "nota cr" in tl or "note credit" in tl or stem.startswith("nc-") or stem.startswith("nc_"):
         return "Nota Crédito"
+    if "nota déb" in tl or "nota deb" in tl or stem.startswith("nd-") or stem.startswith("nd_"):
+        return "Nota Débito"
     if "mandato" in tl or "peaje" in tl:
         return "Mandato/Peaje"
     if "documento soporte" in tl:
         return "Documento Soporte"
+    if "documento equivalente" in tl:
+        return "Documento Equivalente"
     return "Factura Electrónica"
 
 
@@ -147,7 +180,6 @@ def _split_iva_bases(subtotal: float, iva19: float, iva5: float,
 def _clean_name(raw: str) -> str:
     """Limpia un nombre: recorta en etiquetas adyacentes y limita longitud."""
     raw = raw.strip()
-    # Corta si aparece un patrón "Algo:" luego de texto
     m = re.search(r"\s{2,}[A-Za-záéíóúÁÉÍÓÚñÑ ]{3,30}\s*:", raw)
     if m:
         raw = raw[:m.start()].strip()
@@ -184,13 +216,11 @@ def extract_xml(path: Path) -> dict:
     folio = _xml_text(root, "cbc:ID")
     fecha = _xml_text(root, "cbc:IssueDate")
 
-    # Emisor
-    nit_emisor  = _xml_text(root, "cac:AccountingSupplierParty/cac:Party/cac:PartyTaxScheme/cbc:CompanyID")
+    nit_emisor = _xml_text(root, "cac:AccountingSupplierParty/cac:Party/cac:PartyTaxScheme/cbc:CompanyID")
     nom_emisor  = (
         _xml_text(root, "cac:AccountingSupplierParty/cac:Party/cac:PartyLegalEntity/cbc:RegistrationName")
         or _xml_text(root, "cac:AccountingSupplierParty/cac:Party/cac:PartyName/cbc:Name")
     )
-    # Receptor
     nit_receptor = _xml_text(root, "cac:AccountingCustomerParty/cac:Party/cac:PartyTaxScheme/cbc:CompanyID")
     nom_receptor = (
         _xml_text(root, "cac:AccountingCustomerParty/cac:Party/cac:PartyLegalEntity/cbc:RegistrationName")
@@ -276,6 +306,32 @@ def _search_money_near(text: str, label: str, line_start: bool = False) -> float
     return 0.0
 
 
+def _extract_iva_detalle(text: str) -> tuple[float, float]:
+    """
+    Extrae IVA 19% e IVA 5% sumando los montos desde las líneas de detalle.
+    Patrón: {monto_iva} {pct}.00 — el monto aparece justo antes del porcentaje.
+    Limita la búsqueda a la sección de productos para evitar falsos positivos.
+    """
+    m_ini = re.search(r'detalles?\s+de\s+productos?', text, re.I)
+    m_fin = re.search(r'notas?\s+finales?|datos?\s+totales?', text, re.I)
+    if m_ini and m_fin and m_fin.start() > m_ini.start():
+        seccion = text[m_ini.start():m_fin.start()]
+    elif m_ini:
+        seccion = text[m_ini.start():]
+    else:
+        seccion = text
+
+    iva19 = sum(
+        _clean_number(m.group(1))
+        for m in re.finditer(r'([\d.,]+)\s+19\.0+\s', seccion)
+    )
+    iva5 = sum(
+        _clean_number(m.group(1))
+        for m in re.finditer(r'([\d.,]+)\s+5\.0+\s', seccion)
+    )
+    return round(iva19, 2), round(iva5, 2)
+
+
 def _first_group(*matches) -> str:
     """Retorna el primer grupo no vacío de una lista de match objects."""
     for m in matches:
@@ -296,8 +352,9 @@ def extract_pdf(path: Path) -> dict:
         return _empty_row(path.name, str(e))
 
     doc_type = _detect_doc_type(text, path.name)
+    es_doc_equivalente = doc_type == "Documento Equivalente"
 
-    # CUFE / CUDE
+    # ── CUFE / CUDE ────────────────────────────────────────────────────────
     cufe = ""
     m = _RE_CUFE.search(text)
     if m:
@@ -306,37 +363,61 @@ def extract_pdf(path: Path) -> dict:
         m2 = _RE_CUDE.search(text)
         cufe = m2.group(1) if m2 else ""
 
-    # Folio — busca "Número de Factura: FE-001" y similares
-    folio = _first_group(_RE_FOLIO.search(text))
+    # ── Folio ──────────────────────────────────────────────────────────────
+    # Facturas/notas: "Número de Factura: FE-001"
+    # Doc equivalente/soporte: "Número de documento: POSE5217" (inicia con letra)
+    folio = (
+        _first_group(_RE_FOLIO.search(text))
+        or _first_group(_RE_FOLIO_DOC.search(text))
+    )
 
-    # Fecha de emisión
+    # ── Fecha de emisión ───────────────────────────────────────────────────
     fecha = ""
-    # Prefiere "Fecha de Emisión:" o "Fecha Emisión:"
-    m_fecha_label = re.search(r"fecha\s+de\s+emisi[oó]n\s*[:\s]+(\S+)", text, re.I)
-    if m_fecha_label:
-        fecha = _parse_date(m_fecha_label.group(1))
+    m_fecha = re.search(
+        r"fecha\s+(?:de\s+)?(?:emisi[oó]n|generaci[oó]n|expedici[oó]n)\s*[:\s]+(\S+)",
+        text, re.I,
+    )
+    if m_fecha:
+        fecha = _parse_date(m_fecha.group(1))
     else:
         for dm in _RE_DATE.finditer(text):
             fecha = _parse_date(dm.group(1))
             break
 
     # ── Emisor ─────────────────────────────────────────────────────────────
-    # 1. Etiqueta específica DIAN "Nit del Emisor:"
-    m_en = _RE_EMISOR_NIT.search(text)
-    nit_emisor = m_en.group(1).strip() if m_en else ""
+    # Doc Equivalente POS tiene "Datos del vendedor" en lugar de "Datos del emisor".
+    # Los demás tipos (Factura, NC, ND, Soporte, Doc Equiv SPD) tienen "Datos del emisor".
+    tiene_vendedor = bool(re.search(r'datos\s+del\s+vendedor', text, re.I))
 
-    # 2. Razón Social (primera aparición → emisor)
-    m_enombre = _RE_EMISOR_NOMBRE.search(text)
-    nom_emisor = _clean_name(m_enombre.group(1)) if m_enombre else ""
+    if es_doc_equivalente and tiene_vendedor:
+        m = _RE_VENDEDOR_NIT.search(text)
+        nit_emisor = m.group(1).strip() if m else ""
+        m = _RE_VENDEDOR_NOMBRE.search(text)
+        nom_emisor = _clean_name(m.group(1)) if m else ""
+    else:
+        m_en = _RE_EMISOR_NIT.search(text)
+        nit_emisor = m_en.group(1).strip() if m_en else ""
+        m_enombre = _RE_EMISOR_NOMBRE.search(text)
+        nom_emisor = _clean_name(m_enombre.group(1)) if m_enombre else ""
 
     # ── Receptor ───────────────────────────────────────────────────────────
-    # 1. "Número Documento:" o variantes con contexto comprador
-    m_rn = _RE_RECEPTOR_NIT.search(text)
-    nit_receptor = _first_group(m_rn) if m_rn else ""
-
-    # 2. "Nombre o Razón Social:"
-    m_rnombre = _RE_RECEPTOR_NOMBRE.search(text)
-    nom_receptor = _clean_name(m_rnombre.group(1)) if m_rnombre else ""
+    # Doc Equivalente POS: "NIT del adquiriente:", "Razón social:" en sección adquiriente
+    # Resto (Factura, NC, ND, Soporte, Doc Equiv SPD): patrones estándar DIAN
+    if es_doc_equivalente and tiene_vendedor:
+        m = _RE_ADQUIRIENTE_NIT.search(text)
+        nit_receptor = m.group(1).strip() if m else ""
+        m = _RE_ADQUIRIENTE_NOMBRE.search(text)
+        nom_receptor = _clean_name(m.group(1)) if m else ""
+    else:
+        m_rn = _RE_RECEPTOR_NIT.search(text)
+        nit_receptor = _first_group(m_rn) if m_rn else ""
+        m_rnombre = _RE_RECEPTOR_NOMBRE.search(text)
+        nom_receptor = _clean_name(m_rnombre.group(1)) if m_rnombre else ""
+        # Fallback para doc soporte/equivalente SPD: "Razón social" en sección adquiriente
+        if not nom_receptor:
+            m = _RE_ADQUIRIENTE_NOMBRE.search(text)
+            if m:
+                nom_receptor = _clean_name(m.group(1))
 
     # Fallback genérico por NIT si alguno quedó vacío
     if not nit_emisor or not nit_receptor:
@@ -347,36 +428,44 @@ def extract_pdf(path: Path) -> dict:
             nit_receptor = nits[1]
 
     # ── Montos ─────────────────────────────────────────────────────────────
-    # Subtotal = base gravable DESPUÉS de descuentos de línea (= TaxExclusiveAmount en XML)
-    # "Total Bruto Factura" es el campo correcto en la representación gráfica DIAN estándar.
-    # "Subtotal" sería la suma bruta ANTES de descuentos → incorrecto para prorrateo IVA.
+    # Subtotal = Total Bruto Factura/Documento (base después de descuentos)
     subtotal = (
         _search_money_near(text, "Total Bruto Factura")
+        or _search_money_near(text, "Total bruto documento")
         or _search_money_near(text, "base gravable")
         or _search_money_near(text, "base imponible")
         or _search_money_near(text, "subtotal")
     )
-    # IVA 19%: busca línea específica "IVA 19% …" o la línea "IVA …" del resumen de totales.
-    # No se usa "iva" genérico solo porque la columna "IVA %" de los detalles tiene "19.00"
-    # (el porcentaje) en líneas separadas, y el patrón con MULTILINE no los confunde.
-    iva19 = (
-        _search_money_near(text, "IVA 19%")
-        or _search_money_near(text, "impuesto 19")
-        or _search_money_near(text, "IVA", line_start=True)
-    )
-    iva5 = (
-        _search_money_near(text, "IVA 5%")
-        or _search_money_near(text, "impuesto 5")
-    )
-    # Total: "Total factura (=) ㅤ COP $ 1.191.999,83" — el nuevo _search_money_near
-    # maneja espacios unicode y el prefijo "COP $" con [^\d\n]{0,60}.
+
+    # IVA por tasa — primero desde líneas de detalle (más preciso para tasas mixtas)
+    iva19, iva5 = _extract_iva_detalle(text)
+
+    if not iva19 and not iva5:
+        # Fallback: líneas del resumen de totales
+        iva19 = (
+            _search_money_near(text, "IVA 19%")
+            or _search_money_near(text, "impuesto 19")
+            or _search_money_near(text, "IVA", line_start=True)
+        )
+        iva5 = (
+            _search_money_near(text, "IVA 5%")
+            or _search_money_near(text, "impuesto 5")
+        )
+        # Último recurso: "Total IVA" sin discriminar tasa → va a iva_19 por convención
+        if not iva19 and not iva5:
+            iva19 = _search_money_near(text, "Total IVA")
+
+    # Total: "Total factura/documento" tiene prioridad sobre "Total neto" (más preciso)
     total = (
         _search_money_near(text, "Total factura")
+        or _search_money_near(text, "Total documento")
         or _search_money_near(text, "Total neto factura")
+        or _search_money_near(text, "Total neto documento")
         or _search_money_near(text, "total a pagar")
         or _search_money_near(text, "valor total")
     )
 
+    # Nota Crédito: valores negativos. Nota Débito y resto: positivos
     sign = -1 if doc_type == "Nota Crédito" else 1
     subtotal_signed = round(sign * subtotal, 2)
     iva19_signed = round(sign * iva19, 2)
@@ -402,7 +491,8 @@ def extract_pdf(path: Path) -> dict:
         "iva_5":             iva5_signed,
         "no_gravado":        no_grav,
         "total":             round(sign * total, 2),
-        "retencion_fuente":  _calc_retencion(abs(subtotal_signed), nit_emisor),
+        # Nota Crédito no genera nueva retención (la retención fue de la factura original)
+        "retencion_fuente":  0.0 if doc_type == "Nota Crédito" else _calc_retencion(abs(subtotal_signed), nit_emisor),
         "fuente":            "PDF",
     }
 
@@ -425,37 +515,34 @@ def _empty_row(filename: str, error: str) -> dict:
 # Dispatcher principal
 # ══════════════════════════════════════════════════════════════════════════════
 
+def extract_one(path: Path) -> Optional[dict]:
+    """
+    Extrae un único documento (PDF o XML). Sin gestión de `processed`;
+    la deduplicación se hace antes en el escaneo de main.py.
+    Thread-safe: no comparte estado mutable.
+    """
+    try:
+        row = extract_xml(path) if path.suffix.lower() == ".xml" else extract_pdf(path)
+        if not row.get("fecha"):
+            fd = _date_from_folder(path)
+            if fd:
+                row["fecha"] = fd
+        return row
+    except Exception as e:
+        logger.error("FALLO %s: %s", path.name, e)
+        return None
+
+
 def extract_document(path: Path, processed: set[str]) -> Optional[dict]:
-    """
-    Extrae un documento. Prefiere XML si existe el par.
-    Retorna None si ya fue procesado.
-    Soporta subcarpetas: usa la ruta completa (sin extensión) como clave
-    para evitar colisiones entre archivos con el mismo nombre en distintas carpetas.
-    """
-    # Clave única por carpeta+nombre para soportar subcarpetas
+    """Interfaz legada (watcher/app.py). Para lotes grandes usar extract_one."""
     name_key = str(path.with_suffix("")).lower()
     if name_key in processed:
-        logger.info("Omitiendo duplicado: %s", path.name)
         return None
     processed.add(name_key)
 
-    # Prioridad XML
     xml_sibling = path.with_suffix(".xml")
     if path.suffix.lower() == ".pdf" and xml_sibling.exists():
-        logger.info("Usando XML en lugar de PDF: %s", xml_sibling.name)
-        row = extract_xml(xml_sibling)
-        row["archivo"] = path.name
         processed.add(str(xml_sibling.with_suffix("")).lower())
-    elif path.suffix.lower() == ".xml":
-        row = extract_xml(path)
-    else:
-        row = extract_pdf(path)
+        path = xml_sibling
 
-    # Fallback de fecha desde nombre de carpeta (si el archivo está en subcarpeta fechada)
-    if not row.get("fecha"):
-        folder_date = _date_from_folder(path)
-        if folder_date:
-            row["fecha"] = folder_date
-            logger.info("Fecha tomada del nombre de carpeta: %s → %s", path.parent.name, folder_date)
-
-    return row
+    return extract_one(path)

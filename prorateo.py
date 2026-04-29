@@ -37,10 +37,9 @@ def calcular_prorateo(
     df["mes"] = df["fecha"].apply(_mes)
     df["iva_total"] = df["iva_19"].fillna(0) + df["iva_5"].fillna(0)
 
-    es_mandato = df["tipo"].str.lower().str.contains("mandato|peaje", na=False)
-
     filas = []
     for mes, grupo in df.groupby("mes"):
+        es_mandato = grupo["tipo"].str.lower().str.contains("mandato|peaje", na=False)
         mandatos  = grupo[es_mandato]["iva_total"].sum()
         iva_base  = grupo[~es_mandato]["iva_total"].sum()  # IVA sujeto a prorrateo
 

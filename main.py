@@ -2,20 +2,22 @@
 Sistema de gestión de facturas electrónicas DIAN.
 
 Uso:
-    python main.py                         # procesa carpeta ./facturas
-    python main.py --carpeta /ruta/pdfs    # carpeta personalizada
-    python main.py --ingresos 2026-04:5000000,2026-03:4500000
+    python main.py
+    python main.py --carpeta C:/ruta/facturas --ingresos "2026-04:5000000"
+    python main.py --workers 8
 """
 
 import argparse
 import logging
+import os
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
 
-from extractor import extract_document
+from extractor import extract_one
 from validator import validate, build_validation_sheet
 from prorateo import calcular_prorateo, calcular_prorateo_simple
 from excel_writer import write_excel
@@ -25,23 +27,20 @@ LOG_DIR = Path("logs")
 LOG_DIR.mkdir(exist_ok=True)
 log_file = LOG_DIR / f"proceso_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
 
+_file_handler   = logging.FileHandler(log_file, encoding="utf-8")
+_file_handler.setLevel(logging.INFO)
+_stream_handler = logging.StreamHandler(sys.stdout)
+_stream_handler.setLevel(logging.WARNING)   # stdout solo muestra warnings/errores
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[
-        logging.FileHandler(log_file, encoding="utf-8"),
-        logging.StreamHandler(sys.stdout),
-    ],
+    handlers=[_file_handler, _stream_handler],
 )
 logger = logging.getLogger(__name__)
 
 
 def parse_ingresos(raw: str) -> tuple[dict, dict]:
-    """
-    Parsea argumento:
-      --ingresos gravados:2026-04=5000000;2026-03=4500000,excluidos:2026-04=1000000
-    Formato simple aceptado: YYYY-MM:valor (solo gravados).
-    """
     grav, excl = {}, {}
     if not raw:
         return grav, excl
@@ -53,35 +52,49 @@ def parse_ingresos(raw: str) -> tuple[dict, dict]:
     return grav, excl
 
 
-def procesar(carpeta: Path, ingresos_raw: str = "") -> Path:
-    logger.info("Procesando carpeta: %s", carpeta)
+def _resolver_archivos(carpeta: Path) -> list[Path]:
+    """
+    Escaneo recursivo con deduplicación: si existe par PDF+XML para el mismo
+    documento, conserva solo el XML (más confiable). O(n) en un solo pase.
+    """
+    candidatos: dict[str, Path] = {}
+    for p in carpeta.rglob("*"):
+        if p.suffix.lower() not in (".pdf", ".xml"):
+            continue
+        key = str(p.with_suffix("")).lower()
+        existente = candidatos.get(key)
+        # XML gana sobre PDF
+        if existente is None or p.suffix.lower() == ".xml":
+            candidatos[key] = p
+    return sorted(candidatos.values())
 
-    # Escaneo recursivo: incluye subcarpetas (ej. facturas/2026-03/)
-    archivos = sorted(
-        p for p in carpeta.rglob("*")
-        if p.suffix.lower() in (".pdf", ".xml")
-    )
-    if not archivos:
+
+def procesar(carpeta: Path, ingresos_raw: str = "", workers: int = 4) -> Path:
+    archivos = _resolver_archivos(carpeta)
+    total = len(archivos)
+    if not total:
         logger.warning("No se encontraron PDF/XML en %s", carpeta)
         sys.exit(0)
 
-    processed: set[str] = set()
-    filas = []
-    for archivo in archivos:
-        try:
-            row = extract_document(archivo, processed)
+    print(f"Procesando {total} documentos con {workers} workers...")
+
+    filas: list[dict] = []
+    errores_extraccion = 0
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {executor.submit(extract_one, p): p for p in archivos}
+        done = 0
+        for future in as_completed(futures):
+            done += 1
+            row = future.result()
             if row:
-                # Incluye subcarpeta en el campo archivo para trazabilidad
-                try:
-                    rel = archivo.relative_to(carpeta)
-                    if len(rel.parts) > 1:
-                        row["archivo"] = str(rel)
-                except ValueError:
-                    pass
                 filas.append(row)
-                logger.info("OK  %s -> %s | Total: %s", archivo.name, row["tipo"], row["total"])
-        except Exception as e:
-            logger.error("FALLO %s: %s", archivo.name, e)
+            else:
+                errores_extraccion += 1
+            # Progreso en stdout cada 50 archivos o al terminar
+            if done % 50 == 0 or done == total:
+                pct = 100 * done // total
+                print(f"  {done}/{total} ({pct}%) — {errores_extraccion} errores", flush=True)
 
     if not filas:
         logger.error("No se extrajeron datos.")
@@ -90,8 +103,10 @@ def procesar(carpeta: Path, ingresos_raw: str = "") -> Path:
     df = pd.DataFrame(filas)
     df = validate(df)
 
-    errores = (df["validacion"] == "ERROR").sum()
-    logger.info("Validación: %d OK | %d ERROR", len(df) - errores, errores)
+    n_err = int((df["validacion"] == "ERROR").sum())
+    n_ok  = len(df) - n_err
+    print(f"Validacion: {n_ok} OK | {n_err} ERROR de cuadre contable")
+    logger.info("Validacion: %d OK | %d ERROR", n_ok, n_err)
 
     df_val = build_validation_sheet(df)
 
@@ -100,9 +115,8 @@ def procesar(carpeta: Path, ingresos_raw: str = "") -> Path:
         df_pror = calcular_prorateo(df, grav, excl)
     else:
         df_pror = calcular_prorateo_simple(df)
-        logger.warning("Ingresos no proporcionados — prorrateo al 100%")
+        logger.warning("Ingresos no proporcionados — prorrateo al 100%%")
 
-    # Columnas ordenadas para BASE_DATOS (sin validacion/observacion — ver hoja VALIDACION)
     cols_base = [
         "tipo", "cufe", "folio", "fecha",
         "nit_emisor", "nombre_emisor", "nit_receptor", "nombre_receptor",
@@ -122,17 +136,22 @@ def procesar(carpeta: Path, ingresos_raw: str = "") -> Path:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Procesador DIAN de facturas electrónicas")
-    parser.add_argument("--carpeta",   default="facturas", help="Carpeta con PDF/XML")
-    parser.add_argument("--ingresos",  default="",         help="Ingresos gravados: YYYY-MM:valor,...")
+    parser = argparse.ArgumentParser(description="Procesador DIAN de facturas electronicas")
+    parser.add_argument("--carpeta",  default="facturas")
+    parser.add_argument("--ingresos", default="")
+    parser.add_argument(
+        "--workers", type=int,
+        default=min(8, (os.cpu_count() or 4)),
+        help="Hilos paralelos para extraccion (default: min(8, CPUs))",
+    )
     args = parser.parse_args()
 
     carpeta = Path(args.carpeta)
     if not carpeta.exists():
-        logger.error("Carpeta no encontrada: %s", carpeta)
+        print(f"ERROR: Carpeta no encontrada: {carpeta}")
         sys.exit(1)
 
-    out = procesar(carpeta, args.ingresos)
+    out = procesar(carpeta, args.ingresos, args.workers)
     print(f"\nListo: {out}")
 
 
