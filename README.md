@@ -3,9 +3,7 @@ title: Facturas DIAN ABA
 emoji: 🧾
 colorFrom: orange
 colorTo: blue
-sdk: streamlit
-sdk_version: 1.36.0
-app_file: Home.py
+sdk: docker
 pinned: false
 ---
 
