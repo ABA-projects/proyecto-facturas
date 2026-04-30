@@ -1,3 +1,14 @@
+---
+title: Facturas DIAN ABA
+emoji: 🧾
+colorFrom: orange
+colorTo: blue
+sdk: streamlit
+sdk_version: 1.36.0
+app_file: Home.py
+pinned: false
+---
+
 # Facturas DIAN — Automatización Contable Colombia
 
 Procesa facturas electrónicas DIAN (PDF/XML), valida, calcula prorrateo de IVA y te da un asistente contable inteligente para consultarlas en lenguaje natural.
