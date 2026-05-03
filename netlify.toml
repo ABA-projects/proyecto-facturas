@@ -1,0 +1,6 @@
+[build]
+  publish = "public"
+  command = "echo 'No build step: static landing page only. The Streamlit app is deployed separately (see docs/guia-streamlit-cloud.md).'"
+
+[build.environment]
+  PYTHON_VERSION = ""
