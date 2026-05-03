@@ -9,7 +9,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ── CSS colores TaxOps ───────────────────────────────────────────────────────────
+# ── CSS colores TaxOps ──────────────────────────────────────────────────────
 st.markdown("""
 <style>
   /* Fuente y fondo */
@@ -105,43 +105,10 @@ st.markdown("""
 # ── Hero ──────────────────────────────────────────────────────────────────────
 st.markdown("""
 <div class="hero">
-  <a class="logo-link" href="#" title="TaxOps - Automatización Contable">
-    <svg viewBox="0 0 800 200" xmlns="http://www.w3.org/2000/svg" style="height: 110px;">
-      <defs>
-        <style>
-          @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700&display=swap');
-          .logo-text-tax { font-family: 'Montserrat', sans-serif; font-size: 72px; font-weight: 700; fill: #1A1A2E; letter-spacing: -1px; }
-          .logo-text-ops { font-family: 'Montserrat', sans-serif; font-size: 72px; font-weight: 700; fill: #E05519; letter-spacing: -1px; }
-        </style>
-      </defs>
-      <g transform="translate(50, 100)">
-        <circle cx="0" cy="0" r="60" fill="none" stroke="#E05519" stroke-width="4.5" opacity="0.2"/>
-        <g id="gear-teeth">
-          <rect x="-7.5" y="-75" width="15" height="22" fill="#E05519" rx="3" transform="rotate(0)"/>
-          <rect x="-7.5" y="-75" width="15" height="22" fill="#E05519" rx="3" transform="rotate(45)"/>
-          <rect x="-7.5" y="-75" width="15" height="22" fill="#E05519" rx="3" transform="rotate(90)"/>
-          <rect x="-7.5" y="-75" width="15" height="22" fill="#E05519" rx="3" transform="rotate(135)"/>
-          <rect x="-7.5" y="-75" width="15" height="22" fill="#E05519" rx="3" transform="rotate(180)"/>
-          <rect x="-7.5" y="-75" width="15" height="22" fill="#E05519" rx="3" transform="rotate(225)"/>
-          <rect x="-7.5" y="-75" width="15" height="22" fill="#E05519" rx="3" transform="rotate(270)"/>
-          <rect x="-7.5" y="-75" width="15" height="22" fill="#E05519" rx="3" transform="rotate(315)"/>
-        </g>
-        <circle cx="0" cy="0" r="30" fill="white"/>
-        <circle cx="-11" cy="-13" r="8" fill="none" stroke="#1A1A2E" stroke-width="3.5"/>
-        <circle cx="11" cy="13" r="8" fill="none" stroke="#1A1A2E" stroke-width="3.5"/>
-        <line x1="-18" y1="18" x2="18" y2="-18" stroke="#1A1A2E" stroke-width="3.5" stroke-linecap="round"/>
-        <line x1="-13" y1="-11" x2="-13" y2="11" stroke="#1A1A2E" stroke-width="2" opacity="0.35"/>
-        <line x1="0" y1="-11" x2="0" y2="11" stroke="#1A1A2E" stroke-width="2" opacity="0.35"/>
-        <line x1="13" y1="-11" x2="13" y2="11" stroke="#1A1A2E" stroke-width="2" opacity="0.35"/>
-        <line x1="-13" y1="-11" x2="13" y2="-11" stroke="#1A1A2E" stroke-width="2" opacity="0.35"/>
-        <line x1="-13" y1="0" x2="13" y2="0" stroke="#1A1A2E" stroke-width="2" opacity="0.35"/>
-        <line x1="-13" y1="11" x2="13" y2="11" stroke="#1A1A2E" stroke-width="2" opacity="0.35"/>
-      </g>
-      <text x="180" y="130" class="logo-text-tax">Tax</text>
-      <text x="380" y="130" class="logo-text-ops">Ops</text>
-      <line x1="180" y1="155" x2="520" y2="155" stroke="#E05519" stroke-width="2" opacity="0.3"/>
-    </svg>
-  </a>
+  <div class="logo-link">
+    <span style="font-size:2.4rem;font-weight:900;color:#E05519;letter-spacing:-1px;">Tax<span style='color:#1A1A2E'>Ops</span></span>
+    <span style="font-size:0.85rem;color:#4a4a5a;display:block;margin-top:-4px;">Automatización Contable Colombia</span>
+  </div>
   <div class="badge">✅ Automatización · DIAN · Colombia</div>
   <h1>Facturas DIAN</h1>
   <p>Procesa tus facturas electrónicas colombianas de forma automática.
@@ -280,7 +247,8 @@ st.markdown("""
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.markdown("""
 <div class="footer">
-  <strong>TaxOps</strong> · Automatización contable para Colombia
+  <span style="font-weight:700;color:#E05519;">TaxOps</span>
+  &nbsp;·&nbsp; Automatización contable para Colombia
   &nbsp;·&nbsp; Resolución DIAN 000042/2020 · Art. 490 ET
 </div>
 """, unsafe_allow_html=True)

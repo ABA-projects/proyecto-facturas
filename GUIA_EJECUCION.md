@@ -278,3 +278,96 @@ Monitorea cambios y ejecuta los tests unitarios al instante.
 | Parar al primer fallo | `python -m pytest -x` |
 | Buscar por nombre | `python -m pytest -k "iva"` |
 | Tests más lentos | `python -m pytest --durations=10` |
+
+---
+
+## Docker y despliegue local (TaxOps)
+
+### Requisitos
+- Docker ≥ 24 y Docker Compose ≥ v2 instalados
+
+### Primer arranque
+
+```bash
+cd repo-andres/proyecto-facturas
+
+# 1. Crear .env desde la plantilla (solo la primera vez)
+cp .env.example .env
+# Editar .env: ajusta POSTGRES_PASSWORD y verifica GROQ_API_KEY
+
+# 2. Construir imagen y levantar todos los servicios
+docker compose up --build
+```
+
+Cuando aparezca `You can now view your streamlit app in your browser`, los servicios están listos:
+
+| Servicio | URL | Descripción |
+|---|---|---|
+| TaxOps App | http://localhost:8501 | Interfaz Streamlit |
+| Adminer | http://localhost:8080 | UI web para PostgreSQL |
+| PostgreSQL | localhost:5432 | Base de datos (directo) |
+
+### Credenciales Adminer (desarrollo local)
+- Sistema: `PostgreSQL`
+- Servidor: `db`
+- Usuario: `taxops`
+- Contraseña: `taxops_local_2026` (o la que pusiste en `.env`)
+- Base de datos: `taxops`
+
+### Verificar esquema de base de datos
+
+```bash
+docker exec -it taxops_db psql -U taxops -d taxops -c "\dt"
+```
+
+Deben aparecer las 7 tablas: `organizations`, `users`, `clients`, `invoices`,
+`processing_sessions`, `autorretenedores`, `ingresos_prorateo`.
+
+### Comandos cotidianos
+
+```bash
+# Levantar en segundo plano (sin rebuild)
+docker compose up -d
+
+# Ver logs en vivo de la app
+docker compose logs -f app
+
+# Reiniciar solo la app (tras cambios en código)
+docker compose restart app
+
+# Parar todos los servicios
+docker compose down
+
+# Parar Y borrar la base de datos (⚠️ irreversible)
+docker compose down -v
+```
+
+### Rebuild tras cambios en requirements.txt o Dockerfile
+
+```bash
+docker compose build --no-cache app
+docker compose up -d
+```
+
+### Variables de entorno principales (`.env`)
+
+| Variable | Descripción |
+|---|---|
+| `POSTGRES_PASSWORD` | Contraseña de PostgreSQL |
+| `DATABASE_URL` | DSN completo para SQLAlchemy |
+| `GROQ_API_KEY` | Clave API para el chatbot |
+| `TAXOPS_ENV` | `development` / `staging` / `production` |
+| `TAXOPS_ORG_ID` | UUID de la organización activa |
+
+### Estructura de archivos Docker
+
+```
+proyecto-facturas/
+├── Dockerfile            # Multi-stage build (builder + runtime)
+├── docker-compose.yml    # App + PostgreSQL + Adminer
+├── .env                  # Variables locales (NO commitear)
+├── .env.example          # Plantilla para nuevos entornos
+└── db/
+    ├── init.sql          # Esquema PostgreSQL (corre automático al crear DB)
+    └── database.py       # Capa SQLAlchemy UI-agnóstica
+```
