@@ -1,0 +1,72 @@
+# TaxOps — docker-compose para desarrollo local y staging
+# Servicios: app (Streamlit), db (PostgreSQL 16), adminer (DB UI)
+
+services:
+
+  # ── PostgreSQL 16 ────────────────────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    container_name: taxops_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-taxops}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-taxops_dev_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-taxops}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-taxops} -d ${POSTGRES_DB:-taxops}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Adminer — UI ligera para PostgreSQL ──────────────────────────────────────
+  adminer:
+    image: adminer:4
+    container_name: taxops_adminer
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      ADMINER_DEFAULT_SERVER: db
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # ── TaxOps Streamlit App ─────────────────────────────────────────────────────
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: taxops_app
+    restart: unless-stopped
+    ports:
+      - "8501:8501"
+    environment:
+      # DB connection (usada por db/database.py)
+      DATABASE_URL: postgresql://${POSTGRES_USER:-taxops}:${POSTGRES_PASSWORD:-taxops_dev_pass}@db:5432/${POSTGRES_DB:-taxops}
+      # Groq API key para el chatbot
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      # Entorno
+      TAXOPS_ENV: ${TAXOPS_ENV:-development}
+    volumes:
+      # Monta carpeta de facturas para modo carpeta local
+      - ./facturas:/app/facturas
+      - ./outputs:/app/outputs
+      - ./logs:/app/logs
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health')"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+
+volumes:
+  postgres_data:
+    driver: local
