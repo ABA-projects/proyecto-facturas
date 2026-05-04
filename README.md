@@ -7,27 +7,105 @@ sdk: docker
 pinned: false
 ---
 
-# Facturas DIAN — Automatización Contable Colombia
+# TaxOps — Automatización Contable Colombia
 
-Procesa facturas electrónicas DIAN (PDF/XML), valida, calcula prorrateo de IVA y te da un asistente contable inteligente para consultarlas en lenguaje natural.
+Procesa facturas electrónicas DIAN (PDF/XML), valida, calcula prorrateo de IVA y consulta con un asistente contable inteligente multi-modelo (Groq · OpenAI · Anthropic · Google).
+
+## Arquitectura
+
+```mermaid
+graph TB
+    subgraph Input
+        PDF[📄 PDF / XML DIAN]
+    end
+
+    subgraph Core["Pipeline TaxOps"]
+        EXT[extractor.py<br/>PDF + XML UBL 2.1]
+        VAL[validator.py<br/>CUFE · NIT · cuadre]
+        PRO[prorateo.py<br/>Art. 490 ET]
+        SVC[services/processor.py<br/>Orquestación UI-agnóstica]
+    end
+
+    subgraph UI["Streamlit Multi-Página"]
+        HOME[Home.py Landing]
+        P1[1 Procesar]
+        P2[2 Base Datos]
+        P3[3 Validación]
+        P4[4 Prorrateo IVA]
+        P5[5 Chatbot]
+    end
+
+    subgraph AI["AI Providers"]
+        GROQ[Groq llama-3.3-70b]
+        OAI[OpenAI GPT-4o]
+        ANT[Anthropic Claude]
+        GGL[Google Gemini]
+    end
+
+    subgraph Infra["Infraestructura Docker"]
+        DB[(PostgreSQL 16<br/>Multi-tenant)]
+        ADM[Adminer :8080]
+    end
+
+    PDF --> EXT --> VAL --> PRO --> SVC
+    SVC --> DB
+    SVC --> UI
+    HOME --> P1 & P2 & P3 & P4 & P5
+    P5 --> GROQ & OAI & ANT & GGL
+```
+
+## Flujo de datos
+
+```mermaid
+sequenceDiagram
+    participant U as Usuario
+    participant ST as Streamlit
+    participant P as processor.py
+    participant E as extractor.py
+    participant V as validator.py
+    participant PR as prorateo.py
+    participant DB as PostgreSQL
+
+    U->>ST: Sube PDF/XML
+    ST->>P: procesar(archivos, ingresos)
+    P->>E: extract_one(path) × N archivos
+    E-->>P: {tipo, cufe, nit, iva, total...}
+    P->>V: validate(df)
+    V-->>P: df + validacion/observacion
+    P->>PR: calcular_prorateo(df, ingresos)
+    PR-->>P: df_prorrateo Art.490 ET
+    P->>DB: insert_invoices_batch() ON CONFLICT DO NOTHING
+    DB-->>P: n_insertados (deduplicados por CUFE)
+    P-->>ST: ResultadoProcesamiento
+    ST-->>U: Excel 3 hojas + tabla interactiva + chatbot
+```
 
 ---
 
 ## Inicio rápido
 
+### Opción A — Docker (recomendado, incluye PostgreSQL)
+
 ```bash
-# 1. Instalar dependencias
-pip install -r requirements.txt
-
-# 2. Configurar API key de Groq (gratis en console.groq.com)
-#    Editar .streamlit/secrets.toml y reemplazar el placeholder
-#    GROQ_API_KEY = "gsk_tu_clave_aqui"
-
-# 3. Abrir la app web
-python3 -m streamlit run Home.py
+git clone https://github.com/TU_USUARIO/taxops.git && cd taxops
+cp .env.example .env          # edita POSTGRES_PASSWORD y GROQ_API_KEY
+docker-compose up --build     # primera vez (~3 min)
 ```
 
-Abre `http://localhost:8501` — landing page con acceso a todas las funciones.
+| Servicio | URL |
+|----------|-----|
+| TaxOps App | http://localhost:8501 |
+| Adminer (DB UI) | http://localhost:8080 |
+
+### Opción B — Python local
+
+```bash
+pip install -r requirements.txt
+# Configura .streamlit/secrets.toml con tu GROQ_API_KEY
+python -m streamlit run Home.py
+```
+
+Abre `http://localhost:8501`
 
 ---
 
@@ -64,44 +142,55 @@ Monitorea la carpeta `facturas/` con watchdog. Cada vez que copias un archivo, g
 ## Estructura del proyecto
 
 ```
-proyecto-facturas/
+taxops/
 │
-├── Home.py                    ← Landing page (entry point de la app web)
+├── Home.py                    ← Landing page TaxOps (entry point)
 ├── pages/
 │   ├── 1_Procesar.py          ← Upload/carpeta + progreso + descarga Excel
 │   ├── 2_Base_Datos.py        ← Tabla con búsqueda y filtro por tipo
 │   ├── 3_Validacion.py        ← Errores contables con colores OK/ERROR
 │   ├── 4_Prorrateo_IVA.py     ← Cálculo Art. 490 ET por mes
-│   └── 5_Chatbot.py           ← Accounting Assistant
+│   └── 5_Chatbot.py           ← Accounting Assistant multi-modelo
 │
 ├── services/
-│   ├── processor.py           ← Orquestación UI-agnóstica (extracción → validación → prorrateo)
-│   └── chatbot.py             ← Accounting Assistant (Groq llama-3.3-70b, tool use)
+│   ├── processor.py           ← Orquestación UI-agnóstica (lista para FastAPI)
+│   └── chatbot.py             ← Multi-provider: Groq · OpenAI · Anthropic · Google
 │
-├── extractor.py               ← Extracción PDF + XML (INTACTO)
-├── validator.py               ← Validaciones DIAN: CUFE, NITs, cuadre contable (INTACTO)
-├── prorateo.py                ← Prorrateo IVA Art. 490 ET (INTACTO)
-├── excel_writer.py            ← Excel 3 hojas con formato (INTACTO)
-├── main.py                    ← CLI con argparse + ThreadPoolExecutor (INTACTO)
-├── watcher.py                 ← File watcher con watchdog (INTACTO)
-├── app.py                     ← App Streamlit original (INTACTO, sigue funcionando)
+├── utils/
+│   └── theme.py               ← Sistema de temas Dark / Light / System
+│
+├── db/
+│   ├── database.py            ← Capa SQLAlchemy + degraded mode sin PostgreSQL
+│   └── init.sql               ← Schema multi-tenant: 8 tablas con UUID y triggers
+│
+├── static/
+│   └── favicon.svg            ← Logo TaxOps inline SVG
+│
+├── extractor.py               ← Extracción PDF + XML UBL 2.1
+├── validator.py               ← Validaciones DIAN: CUFE, NITs, cuadre contable
+├── prorateo.py                ← Prorrateo IVA Art. 490 ET
+├── excel_writer.py            ← Excel 3 hojas con formato y colores
+├── main.py                    ← CLI con argparse + ThreadPoolExecutor
+├── watcher.py                 ← File watcher local (requiere watchdog separado)
 │
 ├── autorretenedores.txt       ← 3.287 NITs DIAN (corte 25/02/2026)
-├── requirements.txt
-├── .streamlit/
-│   ├── config.toml            ← Tema pastel + límite upload 200 MB
-│   └── secrets.toml           ← API keys locales (en .gitignore, nunca a GitHub)
+├── Dockerfile                 ← Multi-stage, Python 3.11-slim, usuario no-root
+├── docker-compose.yml         ← app + PostgreSQL 16 + Adminer
+├── .env.example               ← Variables de entorno (copiar a .env)
+├── requirements.txt           ← Dependencias cloud (sin watchdog)
+├── packages.txt               ← Libs sistema para lxml (apt)
+├── runtime.txt                ← python-3.11.11
 │
-├── docs/
-│   ├── guia-groq-api.md       ← Cómo obtener y configurar la API key de Groq
-│   └── guia-streamlit-cloud.md ← Deploy paso a paso en Streamlit Community Cloud
+├── .streamlit/
+│   ├── config.toml            ← Tema + límite upload 200 MB
+│   └── secrets.toml           ← API keys locales (en .gitignore)
 │
 ├── tests/
 │   ├── test_extractor.py      ← 44 tests unitarios
 │   ├── test_validator.py      ← 19 tests unitarios
 │   ├── test_prorateo.py       ← 12 tests unitarios
-│   ├── test_chatbot.py        ← 11 tests unitarios (sin llamar API real)
-│   └── test_e2e.py            ← 32 tests end-to-end (requieren PDFs en facturas/)
+│   ├── test_chatbot.py        ← 11 tests unitarios (mock, sin API real)
+│   └── test_e2e.py            ← 32 tests end-to-end (requieren PDFs)
 └── pytest.ini
 ```
 

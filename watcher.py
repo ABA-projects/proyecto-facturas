@@ -16,8 +16,12 @@ import sys
 import time
 from pathlib import Path
 
-from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler
+try:
+    from watchdog.observers import Observer
+    from watchdog.events import FileSystemEventHandler
+except ImportError:
+    print("ERROR: instala watchdog para usar el watcher local: pip install watchdog>=4.0.0")
+    sys.exit(1)
 
 from main import procesar
 
