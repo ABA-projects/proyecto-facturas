@@ -69,10 +69,11 @@ with st.sidebar:
 
     # ── API key status ────────────────────────────────────────────────────────
     key_name = PROVIDERS[selected_provider]["key_name"]
+    import os
     try:
-        _key_val = st.secrets.get(key_name, "")
+        _key_val = st.secrets.get(key_name, "") or os.environ.get(key_name, "")
     except Exception:
-        import os; _key_val = os.environ.get(key_name, "")
+        _key_val = os.environ.get(key_name, "")
 
     if not _key_val:
         st.divider()

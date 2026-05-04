@@ -13,8 +13,7 @@ def _get_key(name: str) -> str:
     """Lee API key desde Streamlit secrets o variable de entorno."""
     try:
         import streamlit as st
-        val = st.secrets.get(name, "")
-        return val or ""
+        return st.secrets.get(name, "") or os.environ.get(name, "")
     except Exception:
         return os.environ.get(name, "")
 
