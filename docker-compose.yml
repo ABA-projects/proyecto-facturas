@@ -50,9 +50,13 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-taxops}:${POSTGRES_PASSWORD:-taxops_dev_pass}@db:5432/${POSTGRES_DB:-taxops}
       # Groq API key para el chatbot
       GROQ_API_KEY: ${GROQ_API_KEY:-}
+      # Org demo (slug=demo en tabla organizations)
+      TAXOPS_ORG_ID: ${TAXOPS_ORG_ID:-48238725-696f-48ea-ba65-f5b6be84efab}
       # Entorno
       TAXOPS_ENV: ${TAXOPS_ENV:-development}
     volumes:
+      # Código fuente montado en vivo (hot-reload sin rebuild)
+      - .:/app
       # Monta carpeta de facturas para modo carpeta local
       - ./facturas:/app/facturas
       - ./outputs:/app/outputs

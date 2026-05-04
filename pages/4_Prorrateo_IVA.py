@@ -1,8 +1,10 @@
 """Página: PRORRATEO_IVA — cálculo Art. 490 ET."""
 
 import streamlit as st
+from utils.theme import apply_theme
 
 st.set_page_config(page_title="Prorrateo IVA · Facturas DIAN", page_icon="📈", layout="wide")
+apply_theme()
 
 st.title("📈 Prorrateo IVA")
 st.caption("Art. 490 Estatuto Tributario — IVA descontable cuando hay ingresos gravados y excluidos")

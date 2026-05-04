@@ -1,6 +1,7 @@
 """Home.py — Landing page principal de Facturas DIAN."""
 
 import streamlit as st
+from utils.theme import apply_theme, theme_selector, _get_palette
 
 st.set_page_config(
     page_title="TaxOps · Facturas DIAN | Automatización Contable Colombia",
@@ -9,105 +10,22 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ── CSS colores TaxOps ──────────────────────────────────────────────────────
-st.markdown("""
-<style>
-  /* Fuente y fondo */
-  html, body, [class*="css"] { font-family: 'Segoe UI', sans-serif; }
+# ── Sidebar: tema ─────────────────────────────────────────────────────────────
+with st.sidebar:
+    st.markdown("### 🎨 Tema")
+    theme_selector()
+    st.divider()
 
-  /* Hero */
-  .hero {
-    background: linear-gradient(135deg, #fdf0e8 0%, #f5f0eb 50%, #e8eef6 100%);
-    border-radius: 16px;
-    padding: 2.5rem 2.5rem 2rem;
-    text-align: center;
-    margin-bottom: 2rem;
-    border-top: 5px solid #E05519;
-  }
-  .hero h1 { font-size: 2.4rem; color: #2B4A7A; margin-bottom: 0.4rem; font-weight: 700; }
-  .hero p  { font-size: 1.1rem; color: #4a4a5a; max-width: 620px; margin: 0 auto 1.5rem; }
-
-  /* Logo wrapper */
-  .logo-link { display: block; margin-bottom: 1rem; }
-  .logo-link img { height: 110px; object-fit: contain; }
-
-  /* Badge de estado */
-  .badge {
-    display: inline-block;
-    background: #fde8d8;
-    color: #c0400a;
-    border-radius: 20px;
-    padding: 4px 16px;
-    font-size: 0.82rem;
-    font-weight: 600;
-    margin-bottom: 0.8rem;
-    border: 1px solid #f0b890;
-  }
-
-  /* Cards de features */
-  .card {
-    background: #ffffff;
-    border-radius: 14px;
-    padding: 1.6rem 1.4rem;
-    box-shadow: 0 2px 12px rgba(43,74,122,0.09);
-    border-top: 4px solid;
-    transition: transform 0.15s ease, box-shadow 0.15s ease;
-    height: 100%;
-  }
-  .card:hover { transform: translateY(-3px); box-shadow: 0 6px 20px rgba(43,74,122,0.15); }
-  .card h3 { font-size: 1.05rem; margin: 0.6rem 0 0.4rem; color: #2B4A7A; font-weight: 700; }
-  .card p  { font-size: 0.9rem; color: #5a6475; margin: 0; line-height: 1.5; }
-  .card .icon { font-size: 2rem; }
-
-  .card-orange { border-color: #E05519; }
-  .card-navy   { border-color: #2B4A7A; }
-  .card-orange2{ border-color: #f0874a; }
-  .card-navy2  { border-color: #4a6fa5; }
-  .card-warm   { border-color: #c04010; }
-
-  /* Sección cómo funciona */
-  .step {
-    display: flex;
-    align-items: flex-start;
-    gap: 1rem;
-    margin-bottom: 1.2rem;
-  }
-  .step-num {
-    background: #E05519;
-    color: #ffffff;
-    border-radius: 50%;
-    width: 36px; height: 36px;
-    display: flex; align-items: center; justify-content: center;
-    font-weight: 700; font-size: 1rem;
-    flex-shrink: 0;
-  }
-  .step-text h4 { margin: 0 0 2px; color: #2B4A7A; font-size: 0.95rem; font-weight: 600; }
-  .step-text p  { margin: 0; color: #5a6475; font-size: 0.88rem; }
-
-  /* Footer */
-  .footer {
-    text-align: center;
-    color: #7a8090;
-    font-size: 0.82rem;
-    margin-top: 3rem;
-    padding-top: 1.5rem;
-    border-top: 2px solid #f0e8e0;
-  }
-  .footer a { color: #E05519; text-decoration: none; font-weight: 600; }
-  .footer a:hover { text-decoration: underline; }
-
-  /* Ocultar header por defecto de Streamlit */
-  #MainMenu { visibility: hidden; }
-  footer    { visibility: hidden; }
-</style>
-""", unsafe_allow_html=True)
+# ── Inyectar CSS del tema activo ──────────────────────────────────────────────
+apply_theme()
+p = _get_palette()
 
 # ── Hero ──────────────────────────────────────────────────────────────────────
-st.markdown("""
+st.markdown(f"""
 <div class="hero">
-  <div class="logo-link">
-    <span style="font-size:2.4rem;font-weight:900;color:#E05519;letter-spacing:-1px;">Tax<span style='color:#1A1A2E'>Ops</span></span>
-    <span style="font-size:0.85rem;color:#4a4a5a;display:block;margin-top:-4px;">Automatización Contable Colombia</span>
+  <div class="logo-link" style="margin-bottom:1rem;">
+    <span style="font-size:2.6rem;font-weight:900;color:{p['accent']};letter-spacing:-2px;line-height:1;">Tax</span><span style="font-size:2.6rem;font-weight:900;color:{p['text']};letter-spacing:-2px;line-height:1;">Ops</span>
+    <span style="font-size:0.82rem;color:{p['text_muted']};display:block;margin-top:2px;letter-spacing:0.5px;">Automatización Contable Colombia</span>
   </div>
   <div class="badge">✅ Automatización · DIAN · Colombia</div>
   <h1>Facturas DIAN</h1>
@@ -181,7 +99,7 @@ col_steps, col_tech = st.columns([1, 1], gap="large")
 
 with col_steps:
     st.markdown("### ¿Cómo funciona?")
-    st.markdown("""
+    st.markdown(f"""
     <div class="step">
       <div class="step-num">1</div>
       <div class="step-text">
@@ -245,10 +163,10 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ── Footer ────────────────────────────────────────────────────────────────────
-st.markdown("""
+st.markdown(f"""
 <div class="footer">
-  <span style="font-weight:700;color:#E05519;">TaxOps</span>
-  &nbsp;·&nbsp; Automatización contable para Colombia
-  &nbsp;·&nbsp; Resolución DIAN 000042/2020 · Art. 490 ET
+  <span style="font-weight:700;color:{p['accent']};">TaxOps</span>
+  &nbsp;·&nbsp; <span style="color:{p['text_muted']};">Automatización contable para Colombia
+  &nbsp;·&nbsp; Resolución DIAN 000042/2020 · Art. 490 ET</span>
 </div>
 """, unsafe_allow_html=True)
