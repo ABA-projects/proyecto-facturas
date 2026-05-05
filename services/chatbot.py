@@ -73,17 +73,59 @@ PROVIDER_DEFAULT = "groq"
 
 # ── System prompt ─────────────────────────────────────────────────────────────
 
-SYSTEM_PROMPT = (
-    "Eres un asistente contable colombiano experto. "
-    "Puedes responder cualquier pregunta sobre: contabilidad, impuestos colombianos, "
-    "facturación electrónica DIAN, Estatuto Tributario, declaraciones de renta e IVA, "
-    "retención en la fuente, régimen simple, NIIF, y normativa contable colombiana. "
-    "Cuando el usuario haya cargado facturas en la sesión, también puedes consultar esos datos "
-    "usando las herramientas disponibles. "
-    "Respondes en español colombiano, de forma clara y práctica. "
-    "Cita artículos del ET, resoluciones DIAN o conceptos DIAN cuando sea relevante. "
-    "Si no sabes algo con certeza, dilo — no inventes normas ni cifras."
-)
+SYSTEM_PROMPT = """Eres TaxOps Assistant, un asistente contable colombiano experto. \
+Puedes responder cualquier pregunta sobre contabilidad, impuestos colombianos, \
+facturación electrónica DIAN, Estatuto Tributario, declaraciones de renta e IVA, \
+retención en la fuente, exógenas, régimen simple, NIIF, y normativa contable colombiana.
+
+Cuando el usuario haya cargado facturas o certificados de retención en la sesión, \
+puedes consultar esos datos usando las herramientas disponibles.
+
+=== NORMATIVA VIGENTE 2025-2026 ===
+
+UVT 2025/2026: $49.799 COP (Decreto 2609/2024). El nuevo valor para año gravable 2026 \
+se publica por la DIAN en diciembre 2025 — verificar en dian.gov.co.
+
+RETENCIÓN EN LA FUENTE — Tarifas principales:
+• Concepto 1302 (Compras/bienes): 2.5% — base mínima 27 UVT ($1.344.573)
+• Concepto 1303 (Servicios generales): 4% — base mínima 4 UVT ($199.196)
+• Concepto 1303 (Honorarios PJ / PN declarante): 10-11% — sin base mínima
+• Concepto 1303 (Servicios transporte carga): 1% — base mínima 4 UVT
+• Concepto 1303 (Limpieza, vigilancia, temporales): 2% — base mínima 4 UVT
+• Concepto 1309 (Retención IVA): 15% del valor del IVA (Art. 437-2 ET, mod. Ley 2277/2022)
+
+ICA: retención municipal, NO hace parte del Formato 1003 DIAN exógenas.
+
+ARTÍCULOS ET RELEVANTES:
+• Art. 437-1: Agentes de retención IVA (grandes contribuyentes, personas jurídicas/naturales DIAN)
+• Art. 437-2: Tarifa retención IVA = 15% (modificado Ley 2277/2022, vigente desde 2023)
+• Art. 438: Operaciones no sujetas a retención IVA
+• Art. 395: Retención sobre salarios (tabla progresiva)
+• Art. 401: Retención pagos al exterior (15% o convenio doble tributación)
+• Art. 490 ET: Prorrateo IVA cuando empresa tiene ingresos gravados y excluidos
+
+FORMATO 1003 — INFORMACIÓN EXÓGENA DIAN:
+• Qué es: Reporte de retenciones en la fuente practicadas/recibidas (pagos sujetos a retención)
+• Obligados: Personas jurídicas y naturales con ingresos brutos > 500 UVT ($24.899.500) \
+  en el año anterior, o patrimonio > 4.500 UVT. Agentes de retención siempre obligados.
+• Plazo 2026: Normalmente entre abril-junio 2026 según últimos dígitos del NIT \
+  (Resolución DIAN de plazos, publicada oct-nov 2025)
+• Contenido: NIT retenedor, NIT retenido, concepto, base gravable, valor retenido, mes
+• Resolución base: Res. 000124/2021 y modificatorias anuales
+
+AUTORRETENEDORES DIAN:
+• Empresas autorretenedoras NO son sujetos de retención por terceros en renta
+• Sí pueden ser sujetos de retención en IVA
+• Lista oficial: dian.gov.co → actualización periódica
+
+CAMBIOS NORMATIVOS RECIENTES:
+• Ley 2277/2022 (reforma tributaria): redujo ret. IVA 50%→15%, nuevas tarifas renta naturales
+• Decreto 2609/2024: UVT 2025 = $49.799
+• Resolución DIAN 000042/2020: Facturación electrónica vigente
+
+Respondes en español colombiano, de forma clara y práctica. \
+Cita artículos del ET o resoluciones DIAN cuando sea relevante. \
+Si no sabes algo con certeza, indícalo — nunca inventes normas ni cifras."""
 
 # ── Tool definitions (formato OpenAI-compatible) ──────────────────────────────
 
@@ -92,7 +134,7 @@ TOOLS: list[dict] = [
         "type": "function",
         "function": {
             "name": "consultar_iva_mes",
-            "description": "Retorna IVA total, descontable y de mandatos para un mes YYYY-MM.",
+            "description": "Retorna IVA total, descontable y de mandatos para un mes YYYY-MM desde las facturas cargadas.",
             "parameters": {
                 "type": "object",
                 "properties": {"mes": {"type": "string", "description": "Mes en formato YYYY-MM"}},
@@ -104,7 +146,7 @@ TOOLS: list[dict] = [
         "type": "function",
         "function": {
             "name": "top_proveedores",
-            "description": "Lista los N proveedores con mayor gasto total.",
+            "description": "Lista los N proveedores con mayor gasto total en las facturas cargadas.",
             "parameters": {
                 "type": "object",
                 "properties": {"n": {"type": "integer", "default": 10}},
@@ -135,8 +177,27 @@ TOOLS: list[dict] = [
         "type": "function",
         "function": {
             "name": "resumen_general",
-            "description": "KPIs generales: total documentos, suma COP, IVA, errores.",
+            "description": "KPIs generales de las facturas: total documentos, suma COP, IVA, errores.",
             "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "resumen_exogenas",
+            "description": "Resumen del Formato 1003 cargado: total base, total retención, filas por concepto.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "top_agentes_retension",
+            "description": "Lista los N agentes retenedores con mayor retención practicada en el 1003 cargado.",
+            "parameters": {
+                "type": "object",
+                "properties": {"n": {"type": "integer", "default": 10}},
+            },
         },
     },
 ]
@@ -179,10 +240,16 @@ def _df_summary(df: pd.DataFrame) -> str:
     )
 
 
+def _is_facturas_df(df: pd.DataFrame) -> bool:
+    return "fecha" in df.columns and "iva_19" in df.columns
+
+
 def _tool_consultar_iva_mes(df: pd.DataFrame, mes: str) -> str:
+    if not _is_facturas_df(df):
+        return "Esta herramienta requiere datos de facturas (no exógenas). Procesa facturas primero en ⚙️ Procesar."
     df_mes = df[df["fecha"].str.startswith(mes, na=False)]
     if df_mes.empty:
-        return f"No hay documentos para {mes}."
+        return f"No hay facturas para el mes {mes}."
     mandatos = df_mes[df_mes["tipo"].str.contains("mandato|peaje", case=False, na=False)]
     normales  = df_mes[~df_mes["tipo"].str.contains("mandato|peaje", case=False, na=False)]
     return (
@@ -195,6 +262,8 @@ def _tool_consultar_iva_mes(df: pd.DataFrame, mes: str) -> str:
 
 
 def _tool_top_proveedores(df: pd.DataFrame, n: int = 10) -> str:
+    if not _is_facturas_df(df):
+        return "Esta herramienta requiere datos de facturas. Para ver los mayores agentes retenedores usa 'resumen_exogenas' o 'top_agentes_retension'."
     if "nombre_emisor" not in df.columns:
         return "Sin datos de proveedores."
     top = (
@@ -208,6 +277,8 @@ def _tool_top_proveedores(df: pd.DataFrame, n: int = 10) -> str:
 
 
 def _tool_buscar_factura(df: pd.DataFrame, query: str) -> str:
+    if not _is_facturas_df(df):
+        return "Esta herramienta requiere datos de facturas. No hay facturas cargadas en sesión."
     q = query.lower()
     mask = (
         df.get("folio", pd.Series(dtype=str)).str.lower().str.contains(q, na=False)
@@ -225,6 +296,8 @@ def _tool_buscar_factura(df: pd.DataFrame, query: str) -> str:
 
 
 def _tool_resumen_errores(df: pd.DataFrame) -> str:
+    if not _is_facturas_df(df):
+        return "Esta herramienta requiere datos de facturas. No hay facturas cargadas en sesión."
     if "validacion" not in df.columns:
         return "Sin datos de validación."
     err = df[df["validacion"] == "ERROR"]
@@ -237,6 +310,8 @@ def _tool_resumen_errores(df: pd.DataFrame) -> str:
 
 
 def _tool_resumen_general(df: pd.DataFrame) -> str:
+    if not _is_facturas_df(df):
+        return "Esta herramienta requiere datos de facturas. Usa 'resumen_exogenas' para ver el resumen del Formato 1003."
     return (
         f"Resumen:\n"
         f"- Documentos: {len(df)}\n"
@@ -247,12 +322,48 @@ def _tool_resumen_general(df: pd.DataFrame) -> str:
     )
 
 
+def _tool_resumen_exogenas(df: pd.DataFrame) -> str:
+    if df is None or df.empty:
+        return "No hay datos de exógenas (Formato 1003) cargados en la sesión."
+    total_base = df.get("base", pd.Series(dtype=float)).sum()
+    total_ret  = df.get("retencion", pd.Series(dtype=float)).sum()
+    por_concepto = df.groupby("concepto")[["base", "retencion"]].sum().reset_index() if "concepto" in df.columns else pd.DataFrame()
+    lines = [
+        f"Resumen Formato 1003:",
+        f"- Filas: {len(df)}",
+        f"- Base total: {_fmt_cop(total_base)}",
+        f"- Retención total: {_fmt_cop(total_ret)}",
+    ]
+    if not por_concepto.empty:
+        lines.append("- Por concepto:")
+        for _, row in por_concepto.iterrows():
+            lines.append(f"  • {row['concepto']}: base {_fmt_cop(row['base'])}, ret. {_fmt_cop(row['retencion'])}")
+    return "\n".join(lines)
+
+
+def _tool_top_agentes_retencion(df: pd.DataFrame, n: int = 10) -> str:
+    if df is None or df.empty:
+        return "No hay datos de exógenas cargados en la sesión."
+    if "razon_social" not in df.columns or "retencion" not in df.columns:
+        return "El Formato 1003 no contiene las columnas esperadas."
+    top = (
+        df.groupby(["nit", "razon_social"])["retencion"]
+        .sum().sort_values(ascending=False).head(n).reset_index()
+    )
+    lines = [f"Top {n} agentes retenedores por retención:"]
+    for i, row in top.iterrows():
+        lines.append(f"{i+1}. {row['razon_social']} (NIT {row['nit']}): {_fmt_cop(row['retencion'])}")
+    return "\n".join(lines)
+
+
 def _ejecutar_herramienta(nombre: str, args: dict, df: pd.DataFrame) -> str:
-    if nombre == "consultar_iva_mes":   return _tool_consultar_iva_mes(df, args.get("mes", ""))
-    if nombre == "top_proveedores":     return _tool_top_proveedores(df, args.get("n", 10))
-    if nombre == "buscar_factura":      return _tool_buscar_factura(df, args.get("query", ""))
-    if nombre == "resumen_errores":     return _tool_resumen_errores(df)
-    if nombre == "resumen_general":     return _tool_resumen_general(df)
+    if nombre == "consultar_iva_mes":      return _tool_consultar_iva_mes(df, args.get("mes", ""))
+    if nombre == "top_proveedores":        return _tool_top_proveedores(df, args.get("n", 10))
+    if nombre == "buscar_factura":         return _tool_buscar_factura(df, args.get("query", ""))
+    if nombre == "resumen_errores":        return _tool_resumen_errores(df)
+    if nombre == "resumen_general":        return _tool_resumen_general(df)
+    if nombre == "resumen_exogenas":       return _tool_resumen_exogenas(df)
+    if nombre == "top_agentes_retension":  return _tool_top_agentes_retencion(df, args.get("n", 10))
     return f"Herramienta '{nombre}' no reconocida."
 
 
@@ -401,215 +512,3 @@ def responder(
     if provider == "anthropic": return _responder_anthropic(prompt, df, historial, model)
     if provider == "google":    return _responder_google(prompt, df, historial, model)
     return f"Proveedor '{provider}' no reconocido."
-
-
-# Backward-compat
-AVAILABLE_MODELS = GROQ_MODELS_FALLBACK
-
-
-# ── Constantes ────────────────────────────────────────────────────────────────
-
-MODEL_DEFAULT = "llama-3.3-70b-versatile"
-
-AVAILABLE_MODELS: list[dict] = [
-    {"id": "llama-3.3-70b-versatile",        "label": "Llama 3.3 70B · Versatile (recomendado)"},
-    {"id": "llama-3.1-8b-instant",            "label": "Llama 3.1 8B · Instant (más rápido)"},
-    {"id": "llama3-70b-8192",                 "label": "Llama 3 70B · 8k ctx"},
-    {"id": "deepseek-r1-distill-llama-70b",   "label": "DeepSeek R1 70B · Razonamiento"},
-    {"id": "gemma2-9b-it",                    "label": "Gemma 2 9B · Google"},
-    {"id": "qwen-qwq-32b",                    "label": "Qwen QwQ 32B · Razonamiento"},
-    {"id": "meta-llama/llama-4-scout-17b-16e-instruct", "label": "Llama 4 Scout 17B · Meta"},
-]
-
-SYSTEM_PROMPT = (
-    "Eres un asistente contable colombiano experto. "
-    "Puedes responder cualquier pregunta sobre: contabilidad, impuestos colombianos, "
-    "facturación electrónica DIAN, Estatuto Tributario, declaraciones de renta e IVA, "
-    "retención en la fuente, régimen simple, NIIF, y normativa contable colombiana. "
-    "Cuando el usuario haya cargado facturas en la sesión, también puedes consultar esos datos "
-    "usando las herramientas disponibles. "
-    "Respondes en español colombiano, de forma clara y práctica. "
-    "Cita artículos del ET, resoluciones DIAN o conceptos DIAN cuando sea relevante. "
-    "Si no sabes algo con certeza, dilo — no inventes normas ni cifras."
-)
-
-# Formato OpenAI-compatible (Groq)
-TOOLS: list[dict] = [
-    {
-        "type": "function",
-        "function": {
-            "name": "consultar_iva_mes",
-            "description": (
-                "Retorna IVA total, IVA descontable (facturas normales) e IVA de mandatos "
-                "para un mes específico en formato YYYY-MM."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "mes": {"type": "string", "description": "Mes en formato YYYY-MM, ej: 2026-03"}
-                },
-                "required": ["mes"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "top_proveedores",
-            "description": "Lista los N proveedores con mayor gasto total (subtotal) en el período.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "n": {"type": "integer", "description": "Número de proveedores a mostrar", "default": 10}
-                },
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "buscar_factura",
-            "description": "Busca facturas por folio, NIT emisor, o nombre del emisor.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "Texto a buscar: folio, NIT o nombre"}
-                },
-                "required": ["query"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "resumen_errores",
-            "description": "Lista todas las facturas con errores de validación y su observación.",
-            "parameters": {"type": "object", "properties": {}},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "resumen_general",
-            "description": (
-                "KPIs generales: total de documentos, suma total COP, IVA 19%, IVA 5%, "
-                "cantidad de errores de validación."
-            ),
-            "parameters": {"type": "object", "properties": {}},
-        },
-    },
-]
-
-
-# ── Implementación de herramientas ────────────────────────────────────────────
-
-def _fmt_cop(valor: float) -> str:
-    return f"${valor:,.0f} COP"
-
-
-def _tool_consultar_iva_mes(df: pd.DataFrame, mes: str) -> str:
-    df_mes = df[df["fecha"].str.startswith(mes, na=False)]
-    if df_mes.empty:
-        return f"No hay documentos registrados para {mes}."
-    mandatos = df_mes[df_mes["tipo"].str.contains("mandato|peaje", case=False, na=False)]
-    normales = df_mes[~df_mes["tipo"].str.contains("mandato|peaje", case=False, na=False)]
-    iva_total = df_mes["iva_19"].sum() + df_mes["iva_5"].sum()
-    iva_mandatos = mandatos["iva_19"].sum() + mandatos["iva_5"].sum()
-    iva_descontable = normales["iva_19"].sum() + normales["iva_5"].sum()
-    return (
-        f"IVA {mes}:\n"
-        f"- Total: {_fmt_cop(iva_total)}\n"
-        f"- Descontable (facturas normales): {_fmt_cop(iva_descontable)}\n"
-        f"- Mandatos/peajes (no descontable): {_fmt_cop(iva_mandatos)}\n"
-        f"- Documentos en el mes: {len(df_mes)}"
-    )
-
-
-def _tool_top_proveedores(df: pd.DataFrame, n: int = 10) -> str:
-    if "nombre_emisor" not in df.columns:
-        return "No hay datos de proveedores disponibles."
-    top = (
-        df.groupby(["nit_emisor", "nombre_emisor"])["subtotal"]
-        .sum()
-        .sort_values(ascending=False)
-        .head(n)
-        .reset_index()
-    )
-    if top.empty:
-        return "No hay datos de proveedores."
-    lines = [f"Top {n} proveedores por gasto:"]
-    for i, row in top.iterrows():
-        lines.append(
-            f"{i + 1}. {row['nombre_emisor']} (NIT {row['nit_emisor']}): {_fmt_cop(row['subtotal'])}"
-        )
-    return "\n".join(lines)
-
-
-def _tool_buscar_factura(df: pd.DataFrame, query: str) -> str:
-    q = query.lower().strip()
-    mask = (
-        df.get("folio", pd.Series(dtype=str)).str.lower().str.contains(q, na=False)
-        | df.get("nit_emisor", pd.Series(dtype=str)).str.lower().str.contains(q, na=False)
-        | df.get("nombre_emisor", pd.Series(dtype=str)).str.lower().str.contains(q, na=False)
-    )
-    resultado = df[mask]
-    if resultado.empty:
-        return f"No se encontraron facturas con '{query}'."
-    cols = ["folio", "fecha", "nombre_emisor", "nit_emisor", "total", "validacion"]
-    cols_present = [c for c in cols if c in resultado.columns]
-    lines = [f"{len(resultado)} factura(s) encontrada(s):"]
-    for _, row in resultado[cols_present].iterrows():
-        total_str = _fmt_cop(row["total"]) if "total" in row else "N/D"
-        lines.append(
-            f"- {row.get('folio', '?')} | {row.get('fecha', '?')} | "
-            f"{row.get('nombre_emisor', '?')} | {total_str} | {row.get('validacion', '?')}"
-        )
-    return "\n".join(lines)
-
-
-def _tool_resumen_errores(df: pd.DataFrame) -> str:
-    if "validacion" not in df.columns:
-        return "No hay datos de validación disponibles."
-    errores = df[df["validacion"] == "ERROR"]
-    if errores.empty:
-        return "Sin errores de validación. Todas las facturas están OK."
-    lines = [f"{len(errores)} factura(s) con errores:"]
-    for _, row in errores.iterrows():
-        lines.append(
-            f"- {row.get('folio', '?')} | {row.get('nombre_emisor', '?')} | "
-            f"{row.get('observacion', 'sin detalle')}"
-        )
-    return "\n".join(lines)
-
-
-def _tool_resumen_general(df: pd.DataFrame) -> str:
-    total_docs = len(df)
-    total_cop = df.get("total", pd.Series(dtype=float)).sum()
-    iva_19 = df.get("iva_19", pd.Series(dtype=float)).sum()
-    iva_5 = df.get("iva_5", pd.Series(dtype=float)).sum()
-    errores = int((df.get("validacion", pd.Series(dtype=str)) == "ERROR").sum())
-    return (
-        f"Resumen general:\n"
-        f"- Documentos procesados: {total_docs}\n"
-        f"- Total COP: {_fmt_cop(total_cop)}\n"
-        f"- IVA 19%: {_fmt_cop(iva_19)}\n"
-        f"- IVA 5%: {_fmt_cop(iva_5)}\n"
-        f"- Errores de validación: {errores}"
-    )
-
-
-# ── Dispatcher ────────────────────────────────────────────────────────────────
-
-def _ejecutar_herramienta(nombre: str, args: dict, df: pd.DataFrame) -> str:
-    if nombre == "consultar_iva_mes":
-        return _tool_consultar_iva_mes(df, args.get("mes", ""))
-    if nombre == "top_proveedores":
-        return _tool_top_proveedores(df, args.get("n", 10))
-    if nombre == "buscar_factura":
-        return _tool_buscar_factura(df, args.get("query", ""))
-    if nombre == "resumen_errores":
-        return _tool_resumen_errores(df)
-    if nombre == "resumen_general":
-        return _tool_resumen_general(df)
-    return f"Herramienta '{nombre}' no reconocida."
-

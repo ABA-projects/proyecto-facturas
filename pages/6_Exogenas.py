@@ -8,10 +8,12 @@ import streamlit as st
 
 from services.processor_exogenas import procesar_exogenas
 from exogenas.excel_writer import write_1003
-from utils.theme import apply_theme
+from utils.theme import apply_theme, theme_topright
+from utils.sidebar_chat import render_sidebar_chat
 
-st.set_page_config(page_title="Exógenas · TaxOps", page_icon="📋", layout="wide")
 apply_theme()
+theme_topright()
+render_sidebar_chat()
 
 st.title("📋 Exógenas — Certificados de Retención")
 st.caption("Procesa certificados de retención en la fuente (PDF) y genera el **Formato 1003 DIAN**.")
@@ -43,7 +45,7 @@ with st.sidebar:
 st.markdown("### 1️⃣ Sube los certificados PDF")
 uploaded = st.file_uploader(
     "Certificados de retención",
-    type=["pdf"],
+    type=["pdf", "docx"],
     accept_multiple_files=True,
     label_visibility="collapsed",
 )

@@ -9,10 +9,12 @@ from pathlib import Path
 import streamlit as st
 from pipeline.excel_writer import write_excel
 from services.processor import procesar, parse_ingresos
-from utils.theme import apply_theme, theme_selector
+from utils.theme import apply_theme, theme_topright
+from utils.sidebar_chat import render_sidebar_chat
 
-st.set_page_config(page_title="Procesar · Facturas DIAN", page_icon="⚙️", layout="wide")
 apply_theme()
+theme_topright()
+render_sidebar_chat()
 
 # ── Estado compartido ─────────────────────────────────────────────────────────
 for key, default in [
@@ -106,12 +108,12 @@ st.title("⚙️ Procesar Facturas")
 if modo == "📤 Upload archivos":
     uploaded = st.file_uploader(
         "Sube tus PDF y/o XML de la DIAN",
-        type=["pdf", "xml"],
+        type=["pdf", "xml", "docx"],
         accept_multiple_files=True,
     )
     ready = bool(uploaded)
     archivos_fn = lambda tmp: sorted(
-        p for p in tmp.rglob("*") if p.suffix.lower() in (".pdf", ".xml")
+        p for p in tmp.rglob("*") if p.suffix.lower() in (".pdf", ".xml", ".docx")
     )
 else:
     carpeta_input = st.text_input("Ruta de la carpeta", placeholder="/ruta/a/facturas")
@@ -139,7 +141,7 @@ if ready and st.button("⚙️ Procesar", type="primary"):
         if not carpeta.exists():
             st.error(f"Carpeta no encontrada: {carpeta}")
             st.stop()
-        archivos = sorted(p for p in carpeta.rglob("*") if p.suffix.lower() in (".pdf", ".xml"))
+        archivos = sorted(p for p in carpeta.rglob("*") if p.suffix.lower() in (".pdf", ".xml", ".docx"))
         grav, excl = parse_ingresos(meses_input)
         resultado = procesar(archivos, grav, excl, on_progress=on_progress, org_id=org_id)
 

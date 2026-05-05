@@ -10,10 +10,12 @@ import streamlit as st
 from sqlalchemy import text
 
 from db.database import db_available, get_db, insert_invoices_batch
-from utils.theme import apply_theme
+from utils.theme import apply_theme, theme_topright
+from utils.sidebar_chat import render_sidebar_chat
 
-st.set_page_config(page_title="Base de Datos · TaxOps", page_icon="🧾", layout="wide")
 apply_theme()
+theme_topright()
+render_sidebar_chat()
 
 _ORG_ID = os.environ.get("TAXOPS_ORG_ID", "00000000-0000-0000-0000-000000000000")
 

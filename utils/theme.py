@@ -210,6 +210,40 @@ def _component_css(p: dict) -> str:
 
     #MainMenu {{ visibility: hidden; }}
     footer    {{ visibility: hidden; }}
+
+    /* ── Fixes modo claro ── */
+    /* Texto en inputs, selectbox y expanders */
+    .stTextInput input, .stTextArea textarea, .stSelectbox select,
+    [data-baseweb="input"] input, [data-baseweb="textarea"] textarea {{
+        color: {p['text']} !important;
+        background-color: {p['bg_card']} !important;
+    }}
+    /* Texto en expanders */
+    [data-testid="stExpander"] summary span,
+    [data-testid="stExpander"] p {{
+        color: {p['text']} !important;
+    }}
+    /* Navegación st.navigation sidebar */
+    [data-testid="stSidebarNavLink"] span,
+    [data-testid="stSidebarNavLink"] p,
+    nav [data-testid="stSidebarNavLink"] {{
+        color: {p['text']} !important;
+    }}
+    /* Chat messages */
+    [data-testid="stChatMessageContent"] p,
+    [data-testid="stChatMessageContent"] {{
+        color: {p['text']} !important;
+    }}
+    /* Tabs */
+    [data-testid="stTabs"] button span {{
+        color: {p['text']} !important;
+    }}
+    /* Checkbox y toggle labels */
+    .stCheckbox label, .stToggle label {{
+        color: {p['text']} !important;
+    }}
+    /* Captions y small text */
+    small, .small {{ color: {p['text_muted']} !important; }}
     """
 
 
@@ -240,17 +274,24 @@ def apply_theme() -> None:
 
 
 def theme_selector() -> None:
-    """Selector de tema para colocar en el sidebar."""
+    """Selector de tema (radio vertical) — usar dentro de st.popover o sidebar."""
     options = ["🌙 Oscuro", "☀️ Claro", "💻 Sistema"]
     current = st.session_state.get("taxops_theme", "🌙 Oscuro")
     selected = st.radio(
         "Tema",
         options,
         index=options.index(current) if current in options else 0,
-        horizontal=True,
         key="taxops_theme_radio",
         label_visibility="collapsed",
     )
     if selected != current:
         st.session_state["taxops_theme"] = selected
         st.rerun()
+
+
+def theme_topright() -> None:
+    """Botón '🎨 Tema' en la esquina superior derecha que abre un popover con el selector de tema."""
+    _, col_btn = st.columns([7, 1])
+    with col_btn:
+        with st.popover("🎨 Tema", use_container_width=True):
+            theme_selector()

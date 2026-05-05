@@ -59,7 +59,7 @@ def _resolver_archivos(carpeta: Path) -> list[Path]:
     """
     candidatos: dict[str, Path] = {}
     for p in carpeta.rglob("*"):
-        if p.suffix.lower() not in (".pdf", ".xml"):
+        if p.suffix.lower() not in (".pdf", ".xml", ".docx"):
             continue
         key = str(p.with_suffix("")).lower()
         existente = candidatos.get(key)

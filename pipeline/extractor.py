@@ -342,15 +342,37 @@ def _first_group(*matches) -> str:
     return ""
 
 
-def extract_pdf(path: Path) -> dict:
-    """Extrae campos de un PDF DIAN con pdfplumber."""
+def _docx_to_text(path: Path) -> str:
+    """Extrae texto plano de un archivo .docx."""
+    from docx import Document
+    doc = Document(str(path))
+    parts = []
+    for para in doc.paragraphs:
+        if para.text.strip():
+            parts.append(para.text)
+    for table in doc.tables:
+        for row in table.rows:
+            parts.append("\t".join(cell.text for cell in row.cells))
+    return "\n".join(parts)
+
+
+def extract_docx(path: Path) -> dict:
+    """Extrae campos de un DOCX DIAN convirtiendo a texto y reutilizando el pipeline de PDF."""
     try:
-        with pdfplumber.open(path) as pdf:
-            text = "\n".join(page.extract_text() or "" for page in pdf.pages)
+        text = _docx_to_text(path)
     except Exception as e:
-        logger.error("Error leyendo PDF %s: %s", path.name, e)
+        logger.error("Error leyendo DOCX %s: %s", path.name, e)
         return _empty_row(path.name, str(e))
 
+    if not text.strip():
+        return _empty_row(path.name, "DOCX sin texto extraíble")
+
+    # Reutiliza la lógica de extracción de texto del pipeline PDF
+    return _extract_from_text(path, text)
+
+
+def _extract_from_text(path: Path, text: str) -> dict:
+    """Extrae campos DIAN desde texto plano (usado por PDF y DOCX)."""
     doc_type = _detect_doc_type(text, path.name)
     es_doc_equivalente = doc_type == "Documento Equivalente"
 
@@ -493,8 +515,19 @@ def extract_pdf(path: Path) -> dict:
         "total":             round(sign * total, 2),
         # Nota Crédito no genera nueva retención (la retención fue de la factura original)
         "retencion_fuente":  0.0 if doc_type == "Nota Crédito" else _calc_retencion(abs(subtotal_signed), nit_emisor),
-        "fuente":            "PDF",
+        "fuente":            path.suffix.upper().lstrip("."),
     }
+
+
+def extract_pdf(path: Path) -> dict:
+    """Extrae campos de un PDF DIAN con pdfplumber."""
+    try:
+        with pdfplumber.open(path) as pdf:
+            text = "\n".join(page.extract_text() or "" for page in pdf.pages)
+    except Exception as e:
+        logger.error("Error leyendo PDF %s: %s", path.name, e)
+        return _empty_row(path.name, str(e))
+    return _extract_from_text(path, text)
 
 
 def _empty_row(filename: str, error: str) -> dict:
@@ -522,7 +555,13 @@ def extract_one(path: Path) -> Optional[dict]:
     Thread-safe: no comparte estado mutable.
     """
     try:
-        row = extract_xml(path) if path.suffix.lower() == ".xml" else extract_pdf(path)
+        suf = path.suffix.lower()
+        if suf == ".xml":
+            row = extract_xml(path)
+        elif suf in (".docx", ".doc"):
+            row = extract_docx(path)
+        else:
+            row = extract_pdf(path)
         if not row.get("fecha"):
             fd = _date_from_folder(path)
             if fd:

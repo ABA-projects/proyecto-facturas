@@ -1,10 +1,12 @@
 """Página: VALIDACION — errores y advertencias contables."""
 
 import streamlit as st
-from utils.theme import apply_theme
+from utils.theme import apply_theme, theme_topright
+from utils.sidebar_chat import render_sidebar_chat
 
-st.set_page_config(page_title="Validación · Facturas DIAN", page_icon="✅", layout="wide")
 apply_theme()
+theme_topright()
+render_sidebar_chat()
 
 st.title("✅ Validación")
 

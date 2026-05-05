@@ -466,22 +466,36 @@ def extract_one(path: "str | Path") -> dict:
         porcentaje, tipo_cert, fuente, archivo, error
     """
     path = Path(path)
+    suf = path.suffix.lower()
     base_dict: dict = {
         "razon_social": "", "nit": "", "dv": "", "tipo_doc": "31",
         "direccion": "", "ciudad_retencion": "", "concepto": "", "base": 0.0,
-        "retencion": 0.0, "porcentaje": 0.0, "tipo_cert": "", "fuente": "PDF",
+        "retencion": 0.0, "porcentaje": 0.0, "tipo_cert": "",
+        "fuente": suf.upper().lstrip("."),
         "archivo": path.name, "error": "",
     }
 
     try:
-        with pdfplumber.open(path) as pdf:
-            text = "\n".join(page.extract_text() or "" for page in pdf.pages)
+        if suf in (".docx", ".doc"):
+            from docx import Document
+            doc = Document(str(path))
+            parts = []
+            for para in doc.paragraphs:
+                if para.text.strip():
+                    parts.append(para.text)
+            for table in doc.tables:
+                for row in table.rows:
+                    parts.append("\t".join(cell.text for cell in row.cells))
+            text = "\n".join(parts)
+        else:
+            with pdfplumber.open(path) as pdf:
+                text = "\n".join(page.extract_text() or "" for page in pdf.pages)
     except Exception as e:
         base_dict["error"] = f"No se pudo abrir: {e}"
         return base_dict
 
     if not text.strip():
-        base_dict["error"] = "PDF sin texto extraíble"
+        base_dict["error"] = f"{suf.upper()} sin texto extraíble"
         return base_dict
 
     tipo_cert             = _cert_type(text)

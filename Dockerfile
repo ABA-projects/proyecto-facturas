@@ -44,6 +44,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
 CMD ["streamlit", "run", "Home.py", \
      "--server.port=8501", \
      "--server.address=0.0.0.0", \
-     "--server.headless=true", \
-     "--server.enableCORS=false", \
-     "--server.enableXsrfProtection=true"]
+     "--server.headless=true"]

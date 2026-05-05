@@ -2,9 +2,9 @@
 
 import streamlit as st
 from services.chatbot import responder, PROVIDERS, MODEL_DEFAULT, PROVIDER_DEFAULT, get_groq_models
-from utils.theme import apply_theme
+from utils.theme import apply_theme, theme_topright
+from utils.sidebar_chat import render_sidebar_chat
 
-st.set_page_config(page_title="Chatbot · TaxOps", page_icon="🧾", layout="wide")
 apply_theme()
 
 st.title("🤖 Accounting Assistant")
@@ -100,22 +100,28 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
 
 # ── Contexto de datos ─────────────────────────────────────────────────────────
-tiene_datos = st.session_state.get("processed") and st.session_state.get("df_base") is not None
-df = st.session_state.get("df_base") if tiene_datos else None
+df_facturas  = st.session_state.get("df_base")
+ex_resultado = st.session_state.get("exogenas_resultado")
+df_exogenas  = ex_resultado.df_1003 if ex_resultado and not ex_resultado.df_1003.empty else None
 
-if tiene_datos:
-    total   = len(df)
-    errores = int((df.get("validacion", "") == "ERROR").sum()) if "validacion" in df.columns else 0
-    st.success(
-        f"📂 {total} facturas en sesión · {errores} errores — "
-        "puedo consultar estos datos además de responder preguntas generales."
-    )
+# Prioriza facturas si están disponibles; si no, usa exógenas
+df = df_facturas if (df_facturas is not None and not df_facturas.empty) else df_exogenas
+
+ctx_parts = []
+if df_facturas is not None and not df_facturas.empty:
+    errores = int((df_facturas.get("validacion", "") == "ERROR").sum()) if "validacion" in df_facturas.columns else 0
+    ctx_parts.append(f"🧾 {len(df_facturas)} facturas ({errores} errores)")
+if df_exogenas is not None:
+    ctx_parts.append(f"📋 {len(df_exogenas)} filas Formato 1003")
+
+if ctx_parts:
+    st.success("📂 Datos en sesión: " + " · ".join(ctx_parts) + " — puedo consultar estos datos.")
     if selected_provider in ("anthropic", "google"):
         st.info("ℹ️ Con este proveedor los datos se incluyen como contexto en el prompt (sin tool use).")
 else:
     st.info(
         "💬 Pregúntame sobre contabilidad, IVA, retención, DIAN y normativa colombiana. "
-        "Si procesas facturas en ⚙️ Procesar, también podré analizarlas."
+        "Procesa facturas en ⚙️ Procesar o certificados en 📋 Exógenas para analizar tus datos."
     )
 
 st.divider()
@@ -126,7 +132,7 @@ if not st.session_state.messages:
     sugerencias = (
         ["¿Cuánto IVA pagué este mes?", "¿Cuáles son mis 5 mayores proveedores?",
          "¿Qué facturas tienen errores?", "Dame un resumen general"]
-        if tiene_datos else
+        if df is not None else
         ["¿Qué es el prorrateo de IVA Art. 490 ET?", "¿Cuándo aplica retención en la fuente?",
          "¿Cuál es la diferencia entre CUFE y CUDE?", "¿Qué documentos generan IVA descontable?"]
     )

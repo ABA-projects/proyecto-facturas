@@ -21,6 +21,8 @@ env/
 facturas/
 *.pdf
 *.xml
+*.docx
+*.doc
 
 # ── Archivos generados / Excel ────────────────────────────────────────────────
 output/
