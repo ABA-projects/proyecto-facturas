@@ -10,9 +10,9 @@ from pathlib import Path
 
 import pandas as pd
 
-from facturas.extractor import extract_one
-from facturas.validator import validate, build_validation_sheet
-from facturas.prorateo import calcular_prorateo, calcular_prorateo_simple
+from pipeline.extractor import extract_one
+from pipeline.validator import validate, build_validation_sheet
+from pipeline.prorateo import calcular_prorateo, calcular_prorateo_simple
 
 BASE_COLS = [
     "tipo", "cufe", "folio", "fecha",
