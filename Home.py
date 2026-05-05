@@ -94,6 +94,36 @@ with c5:
 
 st.markdown("<br>", unsafe_allow_html=True)
 
+# ── Módulos principales ───────────────────────────────────────────────────────
+st.markdown("---")
+st.markdown("### 🚀 Módulos disponibles")
+
+col_mod1, col_mod2 = st.columns(2)
+
+with col_mod1:
+    st.markdown("""
+    <div class="card card-navy">
+      <div class="icon">🧾</div>
+      <h3>Facturas DIAN</h3>
+      <p>Procesa facturas electrónicas PDF/XML. Extrae CUFE, NITs, IVA y retención.
+         Genera Excel con BASE_DATOS, VALIDACION y PRORRATEO_IVA. Chatbot contable incluido.</p>
+    </div>""", unsafe_allow_html=True)
+    if st.button("⚙️ Ir a Facturas", use_container_width=True, key="btn_mod_facturas"):
+        st.switch_page("pages/1_Procesar.py")
+
+with col_mod2:
+    st.markdown("""
+    <div class="card card-orange">
+      <div class="icon">📋</div>
+      <h3>Exógenas · Formato 1003</h3>
+      <p>Procesa certificados de retención en la fuente (PDF). Extrae NIT, razón social,
+         base y retención. Genera el Formato 1003 DIAN listo para reportar exógenas.</p>
+    </div>""", unsafe_allow_html=True)
+    if st.button("📋 Ir a Exógenas", use_container_width=True, key="btn_mod_exogenas"):
+        st.switch_page("pages/6_Exogenas.py")
+
+st.markdown("<br>", unsafe_allow_html=True)
+
 # ── Cómo funciona ─────────────────────────────────────────────────────────────
 col_steps, col_tech = st.columns([1, 1], gap="large")
 
