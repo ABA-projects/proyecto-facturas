@@ -39,19 +39,19 @@ python -m pytest --cov=. --cov-report=term-missing
 ## Architecture
 
 TaxOps procesa facturas electrónicas DIAN (PDF/XML) colombianas en un pipeline:
-`facturas/` → `extractor.py` → `validator.py` → `prorateo.py` → `excel_writer.py` / PostgreSQL
+`facturas/` → `facturas/extractor.py` → `validator.py` → `prorateo.py` → `excel_writer.py` / PostgreSQL
 
 **Stack:** Streamlit multi-página · PostgreSQL 16 · SQLAlchemy · Groq/OpenAI/Anthropic/Google · Docker
 
 ### Module responsibilities
 
-- **`extractor.py`** — Parsing de documentos. `extract_one(path)` es el entry point principal (thread-safe). Despacha a `extract_xml()` o `extract_pdf()` por extensión. XML tiene prioridad cuando coexisten ambos. Carga `autorretenedores.txt` al inicio como frozenset O(1). Fallback de fecha desde nombre de carpeta (`_date_from_folder`).
+- **`facturas/extractor.py`** — Parsing de documentos. `extract_one(path)` es el entry point principal (thread-safe). Despacha a `extract_xml()` o `extract_pdf()` por extensión. XML tiene prioridad cuando coexisten ambos. Carga `autorretenedores.txt` al inicio como frozenset O(1). Fallback de fecha desde nombre de carpeta (`_date_from_folder`).
 
-- **`validator.py`** — Validación stateless sobre DataFrame. `validate()` agrega columnas `validacion` (OK/ERROR) y `observacion`. Verifica: formato CUFE/CUDE (96 hex), duplicados, formato NIT, subtotal+IVA≈total (tolerancia $1 COP), campos obligatorios vacíos, mandato/peaje con IVA.
+- **`facturas/validator.py`** — Validación stateless sobre DataFrame. `validate()` agrega columnas `validacion` (OK/ERROR) y `observacion`. Verifica: formato CUFE/CUDE (96 hex), duplicados, formato NIT, subtotal+IVA≈total (tolerancia $1 COP), campos obligatorios vacíos, mandato/peaje con IVA.
 
-- **`prorateo.py`** — Prorrateo IVA Art. 490 E.T. `calcular_prorateo()` recibe dicts `{YYYY-MM: float}` para gravados/excluidos. Mandatos siempre van a no-deducible. Notas Crédito tienen signo negativo → reducen automáticamente el mes. `calcular_prorateo_simple()` retorna 100% deducible con columna de advertencia.
+- **`facturas/prorateo.py`** — Prorrateo IVA Art. 490 E.T. `calcular_prorateo()` recibe dicts `{YYYY-MM: float}` para gravados/excluidos. Mandatos siempre van a no-deducible. Notas Crédito tienen signo negativo → reducen automáticamente el mes. `calcular_prorateo_simple()` retorna 100% deducible con columna de advertencia.
 
-- **`excel_writer.py`** — Escribe el workbook de 3 hojas (BASE_DATOS, VALIDACION, PRORRATEO_IVA). Colores en VALIDACION: rojo=ERROR, verde=OK. Columnas de dinero con formato `#,##0.00`.
+- **`facturas/excel_writer.py`** — Escribe el workbook de 3 hojas (BASE_DATOS, VALIDACION, PRORRATEO_IVA). Colores en VALIDACION: rojo=ERROR, verde=OK. Columnas de dinero con formato `#,##0.00`.
 
 - **`main.py`** — CLI via `argparse`. Deduplica pares PDF/XML en `_resolver_archivos()` antes del paralelismo. Procesa con `ThreadPoolExecutor`. Log por archivo; progreso cada 50 archivos.
 
@@ -69,7 +69,7 @@ TaxOps procesa facturas electrónicas DIAN (PDF/XML) colombianas en un pipeline:
 
 - **`db/init.sql`** — Schema PostgreSQL multi-tenant: `organizations`, `users`, `clients`, `invoices`, `processing_sessions`, `autorretenedores`, `ingresos_prorateo`. UUID como PK, índices GIN trigram en campos de búsqueda.
 
-- **`autorretenedores.txt`** — 3.287 NITs DIAN (corte 25/02/2026). Cargado al inicio de `extractor.py`. Para actualizar: reemplazar por nuevo archivo NIT-por-línea. En producción se carga desde tabla `autorretenedores` de PostgreSQL.
+- **`facturas/autorretenedores.txt`** — 3.287 NITs DIAN (corte 25/02/2026). Cargado al inicio de `facturas/extractor.py`. Para actualizar: reemplazar por nuevo archivo NIT-por-línea. En producción se carga desde tabla `autorretenedores` de PostgreSQL.
 
 - **`static/favicon.svg`** — Favicon inline SVG con logo TaxOps (Tax naranja + Ops azul marino).
 

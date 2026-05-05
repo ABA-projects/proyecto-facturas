@@ -18,7 +18,7 @@ env/
 *.env
 
 # ── Facturas y datos fiscales (documentos privados) ───────────────────────────
-facturas/
+# Nota: facturas/ es ahora también un paquete Python — PDFs/XMLs ignorados por extensión
 *.pdf
 *.xml
 

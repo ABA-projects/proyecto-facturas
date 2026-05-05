@@ -3,7 +3,7 @@
 import pandas as pd
 import pytest
 
-from prorateo import calcular_prorateo, calcular_prorateo_simple
+from facturas.prorateo import calcular_prorateo, calcular_prorateo_simple
 
 
 def _df(*filas):

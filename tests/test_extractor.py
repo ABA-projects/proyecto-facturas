@@ -7,7 +7,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-from extractor import (
+from facturas.extractor import (
     _clean_number,
     _parse_date,
     _date_from_folder,
@@ -262,7 +262,7 @@ class TestExtractPdf:
     def test_campos_basicos(self, tmp_path):
         p = tmp_path / "FE-999.pdf"
         p.write_bytes(b"")
-        with patch("extractor.pdfplumber.open", return_value=_mock_pdf(TEXTO_FACTURA_DIAN)):
+        with patch("facturas.extractor.pdfplumber.open", return_value=_mock_pdf(TEXTO_FACTURA_DIAN)):
             row = extract_pdf(p)
 
         assert row["folio"] == "FE-999"
@@ -274,7 +274,7 @@ class TestExtractPdf:
     def test_montos_extraidos(self, tmp_path):
         p = tmp_path / "FE-999.pdf"
         p.write_bytes(b"")
-        with patch("extractor.pdfplumber.open", return_value=_mock_pdf(TEXTO_FACTURA_DIAN)):
+        with patch("facturas.extractor.pdfplumber.open", return_value=_mock_pdf(TEXTO_FACTURA_DIAN)):
             row = extract_pdf(p)
 
         assert row["subtotal"] == pytest.approx(950_000.0, abs=1)
@@ -284,7 +284,7 @@ class TestExtractPdf:
     def test_retencion_calculada(self, tmp_path):
         p = tmp_path / "FE-999.pdf"
         p.write_bytes(b"")
-        with patch("extractor.pdfplumber.open", return_value=_mock_pdf(TEXTO_FACTURA_DIAN)):
+        with patch("facturas.extractor.pdfplumber.open", return_value=_mock_pdf(TEXTO_FACTURA_DIAN)):
             row = extract_pdf(p)
         # 950_000 × 2.5% = 23_750
         assert row["retencion_fuente"] == pytest.approx(23_750.0, abs=1)
@@ -296,7 +296,7 @@ class TestExtractPdf:
         )
         p = tmp_path / "NC-001.pdf"
         p.write_bytes(b"")
-        with patch("extractor.pdfplumber.open", return_value=_mock_pdf(texto_nc)):
+        with patch("facturas.extractor.pdfplumber.open", return_value=_mock_pdf(texto_nc)):
             row = extract_pdf(p)
 
         assert row["tipo"] == "Nota Crédito"
@@ -306,6 +306,6 @@ class TestExtractPdf:
     def test_cufe_capturado(self, tmp_path):
         p = tmp_path / "FE-999.pdf"
         p.write_bytes(b"")
-        with patch("extractor.pdfplumber.open", return_value=_mock_pdf(TEXTO_FACTURA_DIAN)):
+        with patch("facturas.extractor.pdfplumber.open", return_value=_mock_pdf(TEXTO_FACTURA_DIAN)):
             row = extract_pdf(p)
         assert row["cufe"] == "a" * 96

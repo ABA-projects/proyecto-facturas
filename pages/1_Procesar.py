@@ -7,7 +7,7 @@ import tempfile
 from pathlib import Path
 
 import streamlit as st
-from excel_writer import write_excel
+from facturas.excel_writer import write_excel
 from services.processor import procesar, parse_ingresos
 from utils.theme import apply_theme, theme_selector
 

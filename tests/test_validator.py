@@ -3,7 +3,7 @@
 import pandas as pd
 import pytest
 
-from validator import _validate_row, validate, build_validation_sheet, TOLERANCE
+from facturas.validator import _validate_row, validate, build_validation_sheet, TOLERANCE
 
 CUFE_VALIDO = "a" * 96  # 96 hex chars válidos
 
