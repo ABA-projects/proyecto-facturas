@@ -48,8 +48,8 @@ if "concepto" in df.columns:
             por_concepto,
             use_container_width=True,
             column_config={
-                "Base ($)":      st.column_config.NumberColumn(format="$ {:,.0f}"),
-                "Retención ($)": st.column_config.NumberColumn(format="$ {:,.0f}"),
+                "Base ($)":      st.column_config.NumberColumn(format="$ %d"),
+                "Retención ($)": st.column_config.NumberColumn(format="$ %d"),
             },
             hide_index=True,
         )
@@ -84,7 +84,7 @@ if "razon_social" in df.columns and "retencion" in df.columns:
             top,
             use_container_width=True,
             column_config={
-                "Retención ($)": st.column_config.NumberColumn(format="$ {:,.0f}"),
+                "Retención ($)": st.column_config.NumberColumn(format="$ %d"),
             },
             hide_index=True,
         )
@@ -106,9 +106,9 @@ with st.expander(f"Ver {len(df)} filas", expanded=False):
         df_show[show_cols],
         use_container_width=True,
         column_config={
-            "Base ($)":      st.column_config.NumberColumn(format="$ {:,.0f}"),
-            "Retención ($)": st.column_config.NumberColumn(format="$ {:,.0f}"),
-            "% Ret":         st.column_config.NumberColumn(format="%.2f %%"),
+            "Base ($)":      st.column_config.NumberColumn(format="$ %d"),
+            "Retención ($)": st.column_config.NumberColumn(format="$ %d"),
+            "% Ret":         st.column_config.NumberColumn(format="%.2f"),
         },
         hide_index=True,
     )

@@ -55,7 +55,7 @@ def _agregar(df: pd.DataFrame) -> pd.DataFrame:
     col_order = [
         "concepto","tipo_doc","nit","dv","primer_apellido","segundo_apellido",
         "primer_nombre","otros_nombres","razon_social","direccion",
-        "cod_dpto","cod_mpio","base","retencion","porcentaje",
+        "ciudad_retencion","cod_dpto","cod_mpio","base","retencion","porcentaje",
     ]
     return agg[col_order]
 

@@ -62,10 +62,7 @@ GOOGLE_MODELS: list[dict] = [
 ]
 
 PROVIDERS: dict[str, dict] = {
-    "groq":      {"name": "🟢 Groq (Llama, Gemma, Mistral…)", "models": GROQ_MODELS_FALLBACK, "key_name": "GROQ_API_KEY",      "free": True},
-    "openai":    {"name": "💬 OpenAI (ChatGPT)",               "models": OPENAI_MODELS,        "key_name": "OPENAI_API_KEY",    "free": False},
-    "anthropic": {"name": "🔮 Anthropic (Claude)",             "models": ANTHROPIC_MODELS,     "key_name": "ANTHROPIC_API_KEY", "free": False},
-    "google":    {"name": "✨ Google (Gemini)",                 "models": GOOGLE_MODELS,        "key_name": "GOOGLE_API_KEY",    "free": False},
+    "groq": {"name": "🟢 Groq (Llama, Gemma, Mistral…)", "models": GROQ_MODELS_FALLBACK, "key_name": "GROQ_API_KEY", "free": True},
 }
 
 MODEL_DEFAULT   = "llama-3.3-70b-versatile"

@@ -21,9 +21,8 @@ with st.sidebar:
     st.markdown("### 🏭 Proveedor")
     provider_keys   = list(PROVIDERS.keys())
     provider_labels = [PROVIDERS[k]["name"] for k in provider_keys]
-    provider_idx    = provider_keys.index(
-        st.session_state.get("chatbot_provider", PROVIDER_DEFAULT)
-    )
+    _saved_prov = st.session_state.get("chatbot_provider", PROVIDER_DEFAULT)
+    provider_idx = provider_keys.index(_saved_prov) if _saved_prov in provider_keys else 0
     selected_provider_label = st.radio(
         "Proveedor", provider_labels, index=provider_idx, label_visibility="collapsed"
     )
@@ -116,8 +115,6 @@ if df_exogenas is not None:
 
 if ctx_parts:
     st.success("📂 Datos en sesión: " + " · ".join(ctx_parts) + " — puedo consultar estos datos.")
-    if selected_provider in ("anthropic", "google"):
-        st.info("ℹ️ Con este proveedor los datos se incluyen como contexto en el prompt (sin tool use).")
 else:
     st.info(
         "💬 Pregúntame sobre contabilidad, IVA, retención, DIAN y normativa colombiana. "
@@ -126,21 +123,39 @@ else:
 
 st.divider()
 
-# ── Sugerencias rápidas ───────────────────────────────────────────────────────
-if not st.session_state.messages:
-    st.markdown("**Preguntas frecuentes:**")
-    sugerencias = (
+# ── Sugerencias rápidas (siempre visibles) ────────────────────────────────────
+if df_facturas is not None and not df_facturas.empty:
+    _sugs = [
         ["¿Cuánto IVA pagué este mes?", "¿Cuáles son mis 5 mayores proveedores?",
-         "¿Qué facturas tienen errores?", "Dame un resumen general"]
-        if df is not None else
+         "¿Qué facturas tienen errores?", "Dame un resumen general"],
+        ["¿Cuánto IVA 19% acumulé en total?", "¿Qué facturas son de mandato o peaje?",
+         "¿Cuál es el proveedor con más facturas?", "¿Hay facturas duplicadas?"],
+    ]
+elif df_exogenas is not None:
+    _sugs = [
+        ["¿Cuál es la retención total del 1003?", "¿Cuáles son los mayores agentes retenedores?",
+         "¿Cuánto hay por concepto 1302?", "¿Qué diferencia hay entre 1303 y 1309?"],
+        ["¿Qué es el Formato 1003?", "¿Cuándo se presenta exógenas 2026?",
+         "Dame el resumen del Formato 1003", "¿Qué es retención de IVA art. 437-2?"],
+    ]
+else:
+    _sugs = [
         ["¿Qué es el prorrateo de IVA Art. 490 ET?", "¿Cuándo aplica retención en la fuente?",
-         "¿Cuál es la diferencia entre CUFE y CUDE?", "¿Qué documentos generan IVA descontable?"]
-    )
-    cols = st.columns(len(sugerencias))
-    for col, sug in zip(cols, sugerencias):
-        with col:
-            if st.button(sug, use_container_width=True):
+         "¿Cuál es la diferencia entre CUFE y CUDE?", "¿Qué documentos generan IVA descontable?"],
+        ["¿Qué es el Formato 1003 DIAN?", "¿Cuándo aplica retención de IVA al 15%?",
+         "¿Cuál es el UVT 2026?", "¿Qué es un autorretenedor?"],
+    ]
+
+# Rotar el set de sugerencias según cantidad de mensajes
+_set = _sugs[len(st.session_state.get("messages", [])) % len(_sugs)]
+
+with st.expander("💡 Preguntas sugeridas", expanded=not st.session_state.get("messages")):
+    _cols = st.columns(2)
+    for i, sug in enumerate(_set):
+        with _cols[i % 2]:
+            if st.button(sug, use_container_width=True, key=f"sug5_{i}_{sug[:12]}"):
                 st.session_state._sugerencia = sug
+                st.rerun()
 
 # ── Historial ─────────────────────────────────────────────────────────────────
 for msg in st.session_state.messages:
@@ -172,3 +187,4 @@ if prompt:
         st.markdown(respuesta)
 
     st.session_state.messages.append({"role": "assistant", "content": respuesta})
+    st.rerun()

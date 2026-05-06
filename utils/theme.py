@@ -128,6 +128,71 @@ def _streamlit_overrides(p: dict) -> str:
     ::-webkit-scrollbar-track {{ background: {p['bg2']}; }}
     ::-webkit-scrollbar-thumb {{ background: {p['border']}; border-radius: 3px; }}
     ::-webkit-scrollbar-thumb:hover {{ background: {p['text_muted']}; }}
+    /* ── Selectbox dropdown menu ── */
+    [data-baseweb="popover"] ul,
+    [data-baseweb="menu"] ul,
+    [data-baseweb="select"] [role="listbox"],
+    [data-baseweb="select"] [role="option"] {{
+        background-color: {p['bg_card']} !important;
+        color: {p['text']} !important;
+    }}
+    [data-baseweb="select"] [role="option"]:hover {{
+        background-color: {p['bg2']} !important;
+    }}
+    /* ── Number input ── */
+    [data-testid="stNumberInput"] input {{
+        background-color: {p['bg_card']} !important;
+        color: {p['text']} !important;
+        border-color: {p['border']} !important;
+    }}
+    /* ── Slider ── */
+    [data-testid="stSlider"] label,
+    [data-testid="stSlider"] [data-testid="stMarkdownContainer"] {{
+        color: {p['text']} !important;
+    }}
+    /* ── File uploader ── */
+    [data-testid="stFileUploader"] label,
+    [data-testid="stFileUploader"] section,
+    [data-testid="stFileUploader"] button,
+    [data-testid="stFileUploaderDropzone"] {{
+        background-color: {p['bg_card']} !important;
+        color: {p['text']} !important;
+        border-color: {p['border']} !important;
+    }}
+    [data-testid="stFileUploaderFileName"] {{
+        color: {p['text']} !important;
+    }}
+    /* ── Expander header ── */
+    [data-testid="stExpander"] details summary {{
+        background-color: {p['bg_card']} !important;
+        color: {p['text']} !important;
+    }}
+    [data-testid="stExpander"] details {{
+        background-color: {p['bg_card']} !important;
+        border-color: {p['border']} !important;
+    }}
+    /* ── Popover ── */
+    [data-testid="stPopover"] div[data-baseweb="popover"],
+    [data-testid="stPopoverBody"] {{
+        background-color: {p['bg_card']} !important;
+        color: {p['text']} !important;
+        border-color: {p['border']} !important;
+    }}
+    /* ── Spinner text ── */
+    [data-testid="stSpinner"] p {{
+        color: {p['text']} !important;
+    }}
+    /* ── Alert text children ── */
+    [data-testid="stAlert"] p,
+    [data-testid="stAlert"] span,
+    [data-testid="stAlert"] div {{
+        color: {p['text']} !important;
+    }}
+    /* ── Multiselect tags ── */
+    [data-baseweb="tag"] {{
+        background-color: {p['blue_dim']} !important;
+        color: {p['text']} !important;
+    }}
     """
 
 

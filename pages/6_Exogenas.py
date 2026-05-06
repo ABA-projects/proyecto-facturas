@@ -96,24 +96,28 @@ if resultado and st.session_state.get("exogenas_processed"):
         st.markdown("#### Formato 1003 (agregado por NIT + concepto)")
 
         df_show = resultado.df_1003.copy()
-        # Columnas amigables para mostrar
         rename = {
             "concepto": "Concepto", "tipo_doc": "Tipo Doc", "nit": "NIT", "dv": "DV",
             "razon_social": "Razón Social", "direccion": "Dirección",
-            "cod_dpto": "Dpto", "cod_mpio": "Mpio",
+            "ciudad_retencion": "Ciudad", "cod_dpto": "Dpto", "cod_mpio": "Mpio",
             "base": "Base ($)", "retencion": "Retención ($)", "porcentaje": "% Ret",
         }
         df_show = df_show.rename(columns=rename)
-        hide_cols = ["primer_apellido","segundo_apellido","primer_nombre","otros_nombres","ciudad_retencion"]
-        df_show = df_show.drop(columns=[c for c in hide_cols if c in df_show.columns])
+        drop_cols = ["primer_apellido","segundo_apellido","primer_nombre","otros_nombres"]
+        df_show = df_show.drop(columns=[c for c in drop_cols if c in df_show.columns])
+
+        # Columnas clave primero para que sean visibles sin scroll
+        priority = ["Concepto", "NIT", "Razón Social", "Base ($)", "Retención ($)", "% Ret",
+                    "Ciudad", "Dpto", "Mpio", "Tipo Doc", "DV", "Dirección"]
+        show_cols = [c for c in priority if c in df_show.columns]
 
         st.dataframe(
-            df_show,
+            df_show[show_cols],
             use_container_width=True,
             column_config={
-                "Base ($)":       st.column_config.NumberColumn(format="$ {:,.0f}"),
-                "Retención ($)":  st.column_config.NumberColumn(format="$ {:,.0f}"),
-                "% Ret":          st.column_config.NumberColumn(format="%.2f %%"),
+                "Base ($)":       st.column_config.NumberColumn(format="$ %d"),
+                "Retención ($)":  st.column_config.NumberColumn(format="$ %d"),
+                "% Ret":          st.column_config.NumberColumn(format="%.2f"),
             },
             hide_index=True,
         )

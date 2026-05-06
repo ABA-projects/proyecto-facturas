@@ -29,7 +29,7 @@ def _get_context() -> tuple:
 
 
 def _render_chat_body() -> None:
-    from services.chatbot import responder, PROVIDER_DEFAULT, MODEL_DEFAULT, SYSTEM_PROMPT
+    from services.chatbot import responder, PROVIDER_DEFAULT, MODEL_DEFAULT
 
     if "sidebar_chat_history" not in st.session_state:
         st.session_state["sidebar_chat_history"] = []
@@ -44,12 +44,16 @@ def _render_chat_body() -> None:
         with st.chat_message(msg["role"]):
             st.markdown(f"<small>{msg['content']}</small>", unsafe_allow_html=True)
 
-    prompt = st.chat_input("Pregunta algo…", key="sidebar_chat_input")
-    if prompt:
+    # Usar form para evitar conflicto con st.chat_input de la página principal
+    with st.form(key="sidebar_chat_form", clear_on_submit=True):
+        prompt = st.text_input("Pregunta algo…", label_visibility="collapsed",
+                               placeholder="Pregunta algo…")
+        submitted = st.form_submit_button("Enviar", use_container_width=True)
+
+    if submitted and prompt.strip():
+        prompt = prompt.strip()
         historial.append({"role": "user", "content": prompt})
 
-        # Si hay datos de exógenas pero el prompt pregunta por esos datos,
-        # inyectamos contexto explícito en el historial del sistema
         prompt_con_contexto = prompt
         if df_activo is not None and tipo_datos == "exogenas":
             try:

@@ -18,7 +18,8 @@ with st.sidebar:
     st.markdown("### 🏭 Proveedor")
     provider_keys   = list(PROVIDERS.keys())
     provider_labels = [PROVIDERS[k]["name"] for k in provider_keys]
-    provider_idx    = provider_keys.index(st.session_state.get("chatbot_provider", PROVIDER_DEFAULT))
+    _saved_prov = st.session_state.get("chatbot_provider", PROVIDER_DEFAULT)
+    provider_idx = provider_keys.index(_saved_prov) if _saved_prov in provider_keys else 0
     selected_provider_label = st.radio("Proveedor", provider_labels, index=provider_idx, label_visibility="collapsed")
     selected_provider = provider_keys[provider_labels.index(selected_provider_label)]
     st.session_state["chatbot_provider"] = selected_provider
@@ -72,24 +73,34 @@ else:
 
 st.divider()
 
-# ── Sugerencias ───────────────────────────────────────────────────────────────
 if "ex_chat_messages" not in st.session_state:
     st.session_state["ex_chat_messages"] = []
 
-if not st.session_state["ex_chat_messages"]:
-    st.markdown("**Preguntas frecuentes:**")
-    sugerencias = (
-        ["¿Cuánto retención total hay?", "¿Cuáles son los mayores agentes retenedores?",
-         "¿Qué es el concepto 1302?", "Diferencia entre 1303 y 1309"]
-        if df is not None else
-        ["¿Qué es el Formato 1003?", "¿Cuándo hay que presentar exógenas?",
-         "¿Qué es la retención de IVA?", "¿Qué tarifa aplica para servicios?"]
-    )
-    cols = st.columns(len(sugerencias))
-    for col, sug in zip(cols, sugerencias):
-        with col:
-            if st.button(sug, use_container_width=True, key=f"exsug_{sug[:15]}"):
+# ── Sugerencias rápidas (siempre visibles) ────────────────────────────────────
+if df is not None:
+    _sugs = [
+        ["¿Cuál es la retención total del 1003?", "¿Cuáles son los mayores agentes retenedores?",
+         "¿Cuánto hay por concepto 1302?", "Dame el resumen del Formato 1003"],
+        ["¿Qué agente retuvo más IVA?", "¿Cuántas filas tiene el 1003?",
+         "¿Hay retenciones por concepto 1309?", "¿Cuál es la base gravable total?"],
+    ]
+else:
+    _sugs = [
+        ["¿Qué es el Formato 1003 DIAN?", "¿Cuándo hay que presentar exógenas?",
+         "¿Qué es la retención de IVA art. 437-2?", "¿Qué tarifa aplica para servicios?"],
+        ["¿Qué es el concepto 1302?", "Diferencia entre 1303 y 1309",
+         "¿Quiénes son agentes de retención?", "¿Cuál es el UVT 2026?"],
+    ]
+
+_set = _sugs[len(st.session_state["ex_chat_messages"]) % len(_sugs)]
+
+with st.expander("💡 Preguntas sugeridas", expanded=not st.session_state["ex_chat_messages"]):
+    _cols = st.columns(2)
+    for i, sug in enumerate(_set):
+        with _cols[i % 2]:
+            if st.button(sug, use_container_width=True, key=f"exsug8_{i}_{sug[:12]}"):
                 st.session_state._ex_sug = sug
+                st.rerun()
 
 # ── Historial ─────────────────────────────────────────────────────────────────
 for msg in st.session_state["ex_chat_messages"]:
@@ -119,3 +130,4 @@ if prompt:
             )
         st.markdown(respuesta)
     st.session_state["ex_chat_messages"].append({"role": "assistant", "content": respuesta})
+    st.rerun()
