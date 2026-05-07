@@ -118,8 +118,10 @@ def _nav():
         </div>
         """, unsafe_allow_html=True)
     with right:
+        nav_bg = c["nav_bg"]
+        border = c["border"]
         st.markdown(
-            f"<div style='background:{c[\"nav_bg\"]};border-bottom:1.5px solid {c[\"border\"]};"
+            f"<div style='background:{nav_bg};border-bottom:1.5px solid {border};"
             f"padding:1rem .5rem;display:flex;align-items:center;justify-content:center;'>",
             unsafe_allow_html=True,
         )
