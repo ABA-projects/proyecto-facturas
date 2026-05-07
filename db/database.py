@@ -1,8 +1,4 @@
-"""db/database.py — Capa de acceso a PostgreSQL con SQLAlchemy.
-
-Uso actual: utilidad para el procesamiento incremental (deduplicación por CUFE).
-Ruta hacia FastAPI: este módulo es UI-agnóstico y se importa igual desde Streamlit o FastAPI.
-"""
+"""db/database.py — PostgreSQL access layer. Engine is lazy: only created when DATABASE_URL is set."""
 
 from __future__ import annotations
 
@@ -10,35 +6,35 @@ import os
 from contextlib import contextmanager
 from typing import Generator
 
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker, Session
+import pandas as pd
 
-# ── Configuración ─────────────────────────────────────────────────────────────
-DATABASE_URL = os.environ.get(
-    "DATABASE_URL",
-    "postgresql://taxops:taxops_dev_pass@localhost:5432/taxops",
-)
+_DATABASE_URL: str | None = os.environ.get("DATABASE_URL")
 
-# pool_pre_ping detecta conexiones caídas automáticamente
-engine = create_engine(
-    DATABASE_URL,
-    pool_pre_ping=True,
-    pool_size=5,
-    max_overflow=10,
-    echo=False,  # True para ver SQL en consola durante desarrollo
-)
+# Module-level engine/session — created only when DATABASE_URL is present
+_engine = None
+_SessionLocal = None
 
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+if _DATABASE_URL:
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker, Session
+    _engine = create_engine(
+        _DATABASE_URL,
+        pool_pre_ping=True,
+        pool_size=2,
+        max_overflow=5,
+        echo=False,
+        connect_args={"connect_timeout": 3},
+    )
+    _SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=_engine)
+
+_db_status: bool | None = None
 
 
 @contextmanager
-def get_db() -> Generator[Session, None, None]:
-    """Context manager para sesiones DB. Uso:
-
-    with get_db() as db:
-        db.execute(text("SELECT 1"))
-    """
-    db = SessionLocal()
+def get_db() -> Generator:
+    if _SessionLocal is None:
+        raise RuntimeError("DATABASE_URL not set — DB unavailable")
+    db = _SessionLocal()
     try:
         yield db
         db.commit()
@@ -49,25 +45,27 @@ def get_db() -> Generator[Session, None, None]:
         db.close()
 
 
-# ── Helpers de negocio ────────────────────────────────────────────────────────
-
 def db_available() -> bool:
-    """Retorna True si la conexión a PostgreSQL está activa."""
+    """True if PostgreSQL is reachable. Result is cached for the process lifetime."""
+    global _db_status
+    if _DATABASE_URL is None:
+        return False
+    if _db_status is not None:
+        return _db_status
     try:
+        from sqlalchemy import text
         with get_db() as db:
             db.execute(text("SELECT 1"))
-        return True
+        _db_status = True
     except Exception:
-        return False
+        _db_status = False
+    return _db_status
 
 
 def get_existing_cufes(org_id: str) -> set[str]:
-    """Retorna el conjunto de CUFEs ya procesados para una organización.
-
-    Utilizado por services/processor.py para el procesamiento incremental.
-    Si la DB no está disponible retorna set vacío (degraded mode).
-    """
+    """CUFEs already processed for an org. Returns empty set if DB unavailable."""
     try:
+        from sqlalchemy import text
         with get_db() as db:
             rows = db.execute(
                 text("SELECT cufe FROM invoices WHERE org_id = :org_id"),
@@ -79,14 +77,15 @@ def get_existing_cufes(org_id: str) -> set[str]:
 
 
 def insert_invoices_batch(rows: list[dict], org_id: str, session_id: str | None = None) -> tuple[int, int]:
-    """Inserta facturas en lote. Omite duplicados (ON CONFLICT DO NOTHING).
+    """Insert invoices in batch. Skips duplicates via ON CONFLICT DO NOTHING.
 
     Returns:
-        (nuevas, duplicadas) conteo de filas.
+        (new_count, duplicate_count)
     """
-    if not rows:
+    if not rows or not db_available():
         return 0, 0
 
+    from sqlalchemy import text
     sql = text("""
         INSERT INTO invoices (
             org_id, cufe, folio, tipo, fecha,
@@ -107,12 +106,11 @@ def insert_invoices_batch(rows: list[dict], org_id: str, session_id: str | None 
         for row in rows:
             r = dict(row)
             r["org_id"] = org_id
-            # Normalizar fecha y calcular periodo en Python
             fecha = r.get("fecha") or None
             r["fecha"] = fecha
             if fecha and str(fecha) not in ("None", "nan", ""):
                 try:
-                    r["periodo"] = str(fecha)[:7]  # "YYYY-MM"
+                    r["periodo"] = str(fecha)[:7]
                 except Exception:
                     r["periodo"] = None
             else:
@@ -120,17 +118,44 @@ def insert_invoices_batch(rows: list[dict], org_id: str, session_id: str | None 
             result = db.execute(sql, r)
             nuevas += result.rowcount
 
-    duplicadas = len(rows) - nuevas
-    return nuevas, duplicadas
+    return nuevas, len(rows) - nuevas
+
+
+def insert_exogenas_batch(df: pd.DataFrame, org_id: str, session_id: str | None = None) -> None:
+    """Insert exogenas detail rows into exogenas_results. One row per df row."""
+    if df.empty or not db_available():
+        return
+
+    from sqlalchemy import text
+    import json
+    sql = text("""
+        INSERT INTO exogenas_results (org_id, session_id, anio, concepto, nit,
+            razon_social, base, retencion, porcentaje, raw_row)
+        VALUES (:org_id, :session_id, :anio, :concepto, :nit,
+            :razon_social, :base, :retencion, :porcentaje, :raw_row::jsonb)
+        ON CONFLICT (org_id, nit, concepto, anio) DO NOTHING
+    """)
+
+    with get_db() as db:
+        for _, row in df.iterrows():
+            db.execute(sql, {
+                "org_id":       org_id,
+                "session_id":   session_id,
+                "anio":         int(row.get("anio", 0) or 0),
+                "concepto":     str(row.get("concepto") or ""),
+                "nit":          str(row.get("nit") or ""),
+                "razon_social": str(row.get("razon_social") or ""),
+                "base":         float(row.get("base") or 0),
+                "retencion":    float(row.get("retencion") or 0),
+                "porcentaje":   float(row.get("porcentaje") or 0),
+                "raw_row":      json.dumps(row.to_dict(), default=str),
+            })
 
 
 def get_autorretenedores_nits() -> set[str]:
-    """Carga NITs autorretenedores desde PostgreSQL.
-
-    Fallback a set vacío si la DB no está disponible (el validador
-    usará el archivo .txt como respaldo).
-    """
+    """Load autorretenedor NITs from PostgreSQL. Falls back to empty set."""
     try:
+        from sqlalchemy import text
         with get_db() as db:
             rows = db.execute(
                 text("SELECT nit FROM autorretenedores WHERE vigente = TRUE")
@@ -140,64 +165,38 @@ def get_autorretenedores_nits() -> set[str]:
         return set()
 
 
-# ── Limpieza mensual ──────────────────────────────────────────────────────────
+# ── Cleanup helpers (used by future admin UI) ─────────────────────────────────
 
 def preview_cleanup(org_id: str, meses_a_conservar: int = 3) -> dict:
-    """Devuelve cuántas facturas y qué períodos se borrarían SIN borrar nada.
-
-    Args:
-        org_id: UUID de la organización.
-        meses_a_conservar: Períodos recientes a mantener (default 3).
-
-    Returns:
-        dict con 'total', 'periodos' (lista), 'desde_periodo' (str corte).
-    """
+    """Preview what would be deleted. Does NOT delete anything."""
     try:
+        from sqlalchemy import text
         with get_db() as db:
-            # Calcular el período de corte: hoy - N meses
-            corte_sql = text(
-                "SELECT TO_CHAR(NOW() - INTERVAL ':n months', 'YYYY-MM') AS corte"
-            )
-            # SQLAlchemy no interpola bien en INTERVAL, usamos formato directo
-            from sqlalchemy import literal_column
             corte_result = db.execute(
                 text(f"SELECT TO_CHAR(NOW() - INTERVAL '{meses_a_conservar} months', 'YYYY-MM') AS corte")
             ).fetchone()
             corte = corte_result[0] if corte_result else None
             if not corte:
                 return {"total": 0, "periodos": [], "desde_periodo": ""}
-
             rows = db.execute(
                 text("""
                     SELECT periodo, COUNT(*) as cnt
                     FROM invoices
-                    WHERE org_id = :org_id
-                      AND periodo IS NOT NULL
-                      AND periodo < :corte
-                    GROUP BY periodo
-                    ORDER BY periodo
+                    WHERE org_id = :org_id AND periodo IS NOT NULL AND periodo < :corte
+                    GROUP BY periodo ORDER BY periodo
                 """),
                 {"org_id": org_id, "corte": corte},
             ).fetchall()
-
         periodos = [{"periodo": r[0], "count": r[1]} for r in rows]
-        total = sum(p["count"] for p in periodos)
-        return {
-            "total": total,
-            "periodos": periodos,
-            "desde_periodo": corte,
-        }
+        return {"total": sum(p["count"] for p in periodos), "periodos": periodos, "desde_periodo": corte}
     except Exception as e:
         return {"total": 0, "periodos": [], "desde_periodo": "", "error": str(e)}
 
 
 def execute_cleanup(org_id: str, meses_a_conservar: int = 3) -> int:
-    """Elimina facturas más antiguas que N meses. Requiere aprobación previa en UI.
-
-    Returns:
-        Número de filas eliminadas.
-    """
+    """Delete invoices older than N months. Returns number of deleted rows."""
     try:
+        from sqlalchemy import text
         with get_db() as db:
             corte_result = db.execute(
                 text(f"SELECT TO_CHAR(NOW() - INTERVAL '{meses_a_conservar} months', 'YYYY-MM') AS corte")
@@ -205,14 +204,8 @@ def execute_cleanup(org_id: str, meses_a_conservar: int = 3) -> int:
             corte = corte_result[0] if corte_result else None
             if not corte:
                 return 0
-
             result = db.execute(
-                text("""
-                    DELETE FROM invoices
-                    WHERE org_id = :org_id
-                      AND periodo IS NOT NULL
-                      AND periodo < :corte
-                """),
+                text("DELETE FROM invoices WHERE org_id = :org_id AND periodo IS NOT NULL AND periodo < :corte"),
                 {"org_id": org_id, "corte": corte},
             )
             return result.rowcount
