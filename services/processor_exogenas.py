@@ -63,10 +63,16 @@ def _agregar(df: pd.DataFrame) -> pd.DataFrame:
 def procesar_exogenas(
     paths: list[Path],
     on_progress: Callable[[int, int, str], None] | None = None,
+    org_id: str | None = None,          # Si se pasa, guarda en PostgreSQL
 ) -> ResultadoExogenas:
     """
     Procesa una lista de certificados de retención PDF.
     Retorna ResultadoExogenas con DataFrames listos para UI y Excel.
+
+    Args:
+        paths: Lista de rutas a procesar.
+        on_progress: Callback opcional (i, total, nombre) para reportar progreso.
+        org_id: UUID de organización. Si se pasa, persiste en PostgreSQL.
     """
     filas: list[dict] = []
     errores = 0
@@ -116,6 +122,15 @@ def procesar_exogenas(
             f"ℹ️ No se encontró código DIAN para ciudad '{row.get('ciudad_retencion','')}' "
             f"({row.get('razon_social','')}). Completa manualmente."
         )
+
+    # ── Persistir en PostgreSQL ───────────────────────────────────────────────
+    if org_id and not df_1003.empty:
+        try:
+            from db.database import insert_exogenas_batch, db_available
+            if db_available():
+                insert_exogenas_batch(df_1003, org_id)
+        except Exception:
+            pass
 
     return ResultadoExogenas(
         df_detalle=df,
