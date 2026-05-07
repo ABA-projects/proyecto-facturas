@@ -34,6 +34,17 @@ if login_required():
 
         st.stop()  # Do not render the rest of the app until logged in
 
+# ── Sidebar: user info + logout ───────────────────────────────────────────────
+if login_required():
+    auth = get_auth_session(st.session_state)
+    if auth:
+        with st.sidebar:
+            st.caption(f"👤 {auth['email']}")
+            if st.button("Cerrar sesión", use_container_width=True):
+                st.session_state["auth"] = None
+                st.rerun()
+            st.divider()
+
 # ── Multi-page navigation ──────────────────────────────────────────────────────
 pg = st.navigation(
     {
