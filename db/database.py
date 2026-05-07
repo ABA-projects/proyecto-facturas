@@ -395,6 +395,48 @@ def execute_cleanup(org_id: str, meses_a_conservar: int = 3) -> int:
         return 0
 
 
+# ── Public registration ────────────────────────────────────────────────────────
+
+def register_org(firm_name: str, email: str, password: str) -> dict:
+    """Create a new org + owner user from the public signup form.
+
+    Returns:
+        dict with org_id, user_id, email — ready to store in session_state["auth"]
+    """
+    from db.auth import hash_password
+    from sqlalchemy import text
+    import uuid, re
+
+    slug_base = re.sub(r"[^a-z0-9]+", "-", firm_name.lower().strip())[:40]
+    org_id  = str(uuid.uuid4())
+    user_id = str(uuid.uuid4())
+    hashed  = hash_password(password)
+
+    with get_db() as db:
+        # Ensure unique slug
+        existing = db.execute(
+            text("SELECT COUNT(*) FROM organizations WHERE slug LIKE :pattern"),
+            {"pattern": f"{slug_base}%"},
+        ).scalar()
+        slug = slug_base if existing == 0 else f"{slug_base}-{existing}"
+
+        db.execute(text("""
+            INSERT INTO organizations (id, slug, name, plan)
+            VALUES (:id, :slug, :name, 'free')
+        """), {"id": org_id, "slug": slug, "name": firm_name.strip()})
+
+        db.execute(text("""
+            INSERT INTO users (id, org_id, email, hashed_password, role)
+            VALUES (:id, :org_id, :email, :hashed_password, 'owner')
+        """), {
+            "id": user_id, "org_id": org_id,
+            "email": email.strip().lower(),
+            "hashed_password": hashed,
+        })
+
+    return {"user_id": user_id, "org_id": org_id, "role": "owner", "email": email.strip().lower()}
+
+
 # ── Super-admin (cross-tenant, no org_id scope) ────────────────────────────────
 
 def superadmin_global_stats() -> dict:

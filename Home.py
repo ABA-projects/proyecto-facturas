@@ -4,6 +4,7 @@ import streamlit as st
 
 from home_gate import login_required, get_auth_session
 from utils.superadmin import is_superadmin
+from home_landing import show_landing
 
 st.set_page_config(
     page_title="TaxOps · Automatización Contable Colombia",
@@ -12,28 +13,12 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ── Login gate (only active when DATABASE_URL is set) ──────────────────────────
+# ── Login gate — show landing page when not authenticated ──────────────────────
 if login_required():
     auth = get_auth_session(st.session_state)
     if auth is None:
-        st.title("🔐 TaxOps — Iniciar Sesión")
-        st.markdown("Ingresa tus credenciales para acceder a la plataforma.")
-
-        with st.form("login_form"):
-            email    = st.text_input("Correo electrónico")
-            password = st.text_input("Contraseña", type="password")
-            submitted = st.form_submit_button("Ingresar", type="primary", use_container_width=True)
-
-        if submitted:
-            from db.auth import authenticate
-            session = authenticate(email, password)
-            if session:
-                st.session_state["auth"] = session
-                st.rerun()
-            else:
-                st.error("Correo o contraseña incorrectos.")
-
-        st.stop()  # Do not render the rest of the app until logged in
+        show_landing()
+        st.stop()
 
 # ── Sidebar: user info + logout ───────────────────────────────────────────────
 if login_required():
