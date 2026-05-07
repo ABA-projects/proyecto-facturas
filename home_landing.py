@@ -1,273 +1,218 @@
 """home_landing.py — Public marketing landing page for TaxOps.
 
-Called from Home.py when the user is not authenticated.
-Renders a full-screen landing with hero, features, about, plans, and login/register forms.
+Uses inline styles so CSS classes don't need to cross st.markdown() boundaries.
 """
 from __future__ import annotations
 
 import streamlit as st
 
+# ── Layout overrides (injected once) ─────────────────────────────────────────
 
-# ── CSS ───────────────────────────────────────────────────────────────────────
-
-_CSS = """
+_LAYOUT_CSS = """
 <style>
-/* ── Reset & base ── */
-[data-testid="stAppViewContainer"] { background: #F0F6FF !important; }
-[data-testid="stHeader"] { display: none; }
-[data-testid="stSidebar"] { display: none; }
-[data-testid="stMainBlockContainer"] { padding-top: 0 !important; max-width: 1100px; }
-footer { display: none; }
+/* Remove Streamlit chrome */
+[data-testid="stHeader"]       { display: none !important; }
+[data-testid="stSidebar"]      { display: none !important; }
+[data-testid="stToolbar"]      { display: none !important; }
+footer                          { display: none !important; }
+#MainMenu                       { display: none !important; }
 
-/* ── Typography ── */
-.land-h1 {
-    font-size: 3rem; font-weight: 800; line-height: 1.15;
-    color: #1A3A5C; margin: 0 0 1rem 0;
+/* Full-width, no padding */
+.main .block-container,
+[data-testid="stMainBlockContainer"] {
+    max-width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
 }
-.land-h2 {
-    font-size: 2rem; font-weight: 700; color: #1A3A5C; margin-bottom: .5rem;
-}
-.land-sub {
-    font-size: 1.2rem; color: #4A6080; line-height: 1.6; margin-bottom: 2rem;
-}
-.land-muted { color: #6B7A8D; font-size: .95rem; }
-
-/* ── Nav bar ── */
-.land-nav {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 1.2rem 2rem;
-    background: #FFFFFF;
-    border-bottom: 1px solid #DDE8F5;
-    position: sticky; top: 0; z-index: 100;
-}
-.land-nav-logo {
-    font-size: 1.5rem; font-weight: 800;
-    background: linear-gradient(135deg, #2563EB, #F97316);
-    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-}
-.land-nav-links a {
-    color: #4A6080; text-decoration: none; margin-left: 2rem;
-    font-weight: 500; font-size: .95rem;
-}
-.land-nav-links a:hover { color: #2563EB; }
-
-/* ── Hero ── */
-.land-hero {
-    background: linear-gradient(135deg, #EBF4FF 0%, #FEF3E8 100%);
-    padding: 5rem 2rem 4rem;
-    border-radius: 0 0 2rem 2rem;
-    text-align: center;
-}
-.land-hero-badge {
-    display: inline-block;
-    background: #DBEAFE; color: #1D4ED8;
-    padding: .3rem 1rem; border-radius: 999px;
-    font-size: .85rem; font-weight: 600; margin-bottom: 1.5rem;
+[data-testid="stVerticalBlockBorderWrapper"],
+[data-testid="stVerticalBlock"] {
+    gap: 0 !important;
 }
 
-/* ── Section container ── */
-.land-section {
-    padding: 4rem 1rem;
-}
-.land-section-alt {
-    background: #FFFFFF;
-    padding: 4rem 1rem;
-    border-radius: 1.5rem;
-    margin: 2rem 0;
+/* Page background */
+[data-testid="stAppViewContainer"],
+[data-testid="stAppViewBlockContainer"],
+.main {
+    background: #F4F8FF !important;
 }
 
-/* ── Feature cards ── */
-.feat-card {
-    background: #FFFFFF;
-    border: 1px solid #DDE8F5;
-    border-radius: 1rem;
-    padding: 1.8rem 1.5rem;
-    height: 100%;
-    transition: box-shadow .2s;
-}
-.feat-card:hover { box-shadow: 0 4px 20px rgba(37,99,235,.10); }
-.feat-icon { font-size: 2.5rem; margin-bottom: .8rem; }
-.feat-title { font-size: 1.1rem; font-weight: 700; color: #1A3A5C; margin-bottom: .5rem; }
-.feat-text  { font-size: .9rem; color: #6B7A8D; line-height: 1.6; }
-
-/* ── Stats bar ── */
-.stat-card {
-    background: linear-gradient(135deg, #DBEAFE, #EBF4FF);
-    border-radius: 1rem; padding: 1.5rem;
-    text-align: center;
-}
-.stat-num { font-size: 2.5rem; font-weight: 800; color: #1D4ED8; }
-.stat-label { font-size: .9rem; color: #4A6080; margin-top: .2rem; }
-
-/* ── Plan cards ── */
-.plan-card {
-    background: #FFFFFF;
-    border: 2px solid #DDE8F5;
-    border-radius: 1.2rem;
-    padding: 2rem 1.5rem;
-    text-align: center;
-    position: relative;
-}
-.plan-card.popular {
-    border-color: #2563EB;
-    box-shadow: 0 0 0 4px #DBEAFE;
-}
-.plan-badge {
-    position: absolute; top: -14px; left: 50%; transform: translateX(-50%);
-    background: #2563EB; color: white;
-    padding: .25rem .9rem; border-radius: 999px; font-size: .8rem; font-weight: 700;
-}
-.plan-name  { font-size: 1.2rem; font-weight: 700; color: #1A3A5C; }
-.plan-price { font-size: 2.2rem; font-weight: 800; color: #1D4ED8; margin: .5rem 0; }
-.plan-price span { font-size: 1rem; color: #6B7A8D; font-weight: 400; }
-.plan-feature { font-size: .9rem; color: #4A6080; padding: .3rem 0; border-bottom: 1px solid #F0F4F8; }
-.plan-feature:last-child { border: none; }
-
-/* ── About card ── */
-.about-card {
-    background: linear-gradient(135deg, #EBF4FF, #FEF3E8);
-    border-radius: 1.5rem; padding: 2.5rem;
-}
-
-/* ── Form panel ── */
-.form-panel {
-    background: #FFFFFF;
-    border: 1px solid #DDE8F5;
-    border-radius: 1.2rem;
-    padding: 2rem;
-    max-width: 480px;
-    margin: 0 auto;
-}
-
-/* ── Footer ── */
-.land-footer {
-    background: #1A3A5C;
-    color: #A0B4CC;
-    padding: 2.5rem 2rem;
-    border-radius: 1.5rem 1.5rem 0 0;
-    margin-top: 3rem;
-    text-align: center;
-}
-.land-footer a { color: #93C5FD; text-decoration: none; }
-.land-footer-title { color: white; font-size: 1.3rem; font-weight: 700; margin-bottom: .5rem; }
-
-/* ── Divider ── */
-.land-divider {
-    border: none; border-top: 1px solid #DDE8F5; margin: 2.5rem 0;
-}
+/* Fix column gaps */
+[data-testid="column"] { padding: 0.4rem !important; }
 </style>
 """
 
+# ── Colour / style constants ──────────────────────────────────────────────────
 
-# ── Sections ─────────────────────────────────────────────────────────────────
+_C = {
+    "bg":         "#F4F8FF",
+    "white":      "#FFFFFF",
+    "blue_dark":  "#1A3A5C",
+    "blue_mid":   "#2563EB",
+    "blue_light": "#DBEAFE",
+    "blue_pale":  "#EBF4FF",
+    "peach":      "#FEF3E8",
+    "peach_mid":  "#FED7AA",
+    "muted":      "#4A6080",
+    "gray":       "#6B7A8D",
+    "border":     "#DDE8F5",
+}
+
+_SECTION  = f"background:{_C['bg']};padding:3rem 3rem 1rem;width:100%;"
+_SECTION_W = f"background:{_C['white']};padding:3rem 3rem 1rem;width:100%;"
+
+
+# ── Nav ───────────────────────────────────────────────────────────────────────
 
 def _nav():
-    st.markdown("""
-    <div class="land-nav">
-        <div class="land-nav-logo">🧾 TaxOps</div>
-        <div class="land-nav-links">
-            <a href="#features">Funcionalidades</a>
-            <a href="#nosotros">Nosotros</a>
-            <a href="#planes">Planes</a>
+    st.markdown(f"""
+    <div style="background:{_C['white']};border-bottom:1.5px solid {_C['border']};
+                padding:1rem 3rem;display:flex;align-items:center;
+                justify-content:space-between;position:sticky;top:0;z-index:999;">
+        <div style="font-size:1.6rem;font-weight:900;
+                    background:linear-gradient(135deg,{_C['blue_mid']},{_C['peach_mid']});
+                    -webkit-background-clip:text;-webkit-text-fill-color:transparent;">
+            🧾 TaxOps
+        </div>
+        <div style="font-size:.92rem;color:{_C['muted']};font-weight:500;">
+            Automatización contable para Colombia &nbsp;·&nbsp;
+            <span style="color:{_C['blue_mid']}">📍 Medellín</span>
         </div>
     </div>
     """, unsafe_allow_html=True)
 
+
+# ── Hero ──────────────────────────────────────────────────────────────────────
 
 def _hero():
-    st.markdown("""
-    <div class="land-hero">
-        <div class="land-hero-badge">🇨🇴 Hecho para firmas contables colombianas</div>
-        <h1 class="land-h1">Tu firma contable,<br>en piloto automático</h1>
-        <p class="land-sub">
-            TaxOps procesa tus facturas electrónicas DIAN, calcula el prorrateo de IVA<br>
-            según el Art. 490 E.T. y prepara tus exógenas — en minutos, no en días.
+    st.markdown(f"""
+    <div style="background:linear-gradient(135deg,{_C['blue_pale']} 0%,{_C['peach']} 100%);
+                padding:5rem 3rem 4rem;text-align:center;width:100%;">
+        <div style="display:inline-block;background:{_C['blue_light']};color:{_C['blue_mid']};
+                    padding:.35rem 1.1rem;border-radius:999px;font-size:.85rem;
+                    font-weight:700;margin-bottom:1.5rem;">
+            🇨🇴 Hecho para firmas contables colombianas
+        </div>
+        <h1 style="font-size:3.2rem;font-weight:900;color:{_C['blue_dark']};
+                   line-height:1.15;margin:0 0 1.2rem;">
+            Tu firma contable,<br>en piloto automático
+        </h1>
+        <p style="font-size:1.2rem;color:{_C['muted']};line-height:1.7;
+                  max-width:640px;margin:0 auto 2rem;">
+            Procesa facturas DIAN, calcula el prorrateo de IVA según el Art. 490 E.T.
+            y prepara tus exógenas — en minutos, no en días.
         </p>
+        <div style="font-size:1rem;color:{_C['gray']};">
+            ↓ Crea tu cuenta gratis más abajo
+        </div>
     </div>
     """, unsafe_allow_html=True)
 
 
+# ── Stats ─────────────────────────────────────────────────────────────────────
+
 def _stats():
+    st.markdown(f"<div style='{_SECTION_W}padding-top:2rem;padding-bottom:2rem;'>",
+                unsafe_allow_html=True)
     c1, c2, c3, c4 = st.columns(4)
-    for col, num, lbl in [
-        (c1, "3.287+", "NITs autorretenedores"),
-        (c2, "< 5 min", "para procesar 100 facturas"),
-        (c3, "PDF + XML", "formatos DIAN soportados"),
-        (c4, "Art. 490", "prorrateo IVA automático"),
-    ]:
+    items = [
+        ("3.287+", "NITs autorretenedores DIAN"),
+        ("< 5 min", "para procesar 100 facturas"),
+        ("PDF + XML", "formatos DIAN soportados"),
+        ("Art. 490", "prorrateo IVA automático"),
+    ]
+    for col, (num, lbl) in zip([c1, c2, c3, c4], items):
         col.markdown(f"""
-        <div class="stat-card">
-            <div class="stat-num">{num}</div>
-            <div class="stat-label">{lbl}</div>
+        <div style="background:linear-gradient(135deg,{_C['blue_light']},{_C['blue_pale']});
+                    border-radius:1rem;padding:1.5rem 1rem;text-align:center;margin:.3rem;">
+            <div style="font-size:2.2rem;font-weight:900;color:{_C['blue_mid']};">{num}</div>
+            <div style="font-size:.88rem;color:{_C['muted']};margin-top:.3rem;">{lbl}</div>
         </div>
         """, unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
+
+# ── Features ──────────────────────────────────────────────────────────────────
 
 def _features():
-    st.markdown('<div id="features"></div>', unsafe_allow_html=True)
-    st.markdown('<div style="text-align:center;padding:2rem 0 1rem">'
-                '<h2 class="land-h2">Todo lo que tu firma necesita</h2>'
-                '<p class="land-muted">Una plataforma, todas las herramientas</p></div>',
-                unsafe_allow_html=True)
+    st.markdown(f"""
+    <div style="{_SECTION}padding-bottom:0;">
+        <div style="text-align:center;margin-bottom:2rem;">
+            <h2 style="font-size:2rem;font-weight:800;color:{_C['blue_dark']};margin:0 0 .4rem;">
+                Todo lo que tu firma necesita
+            </h2>
+            <p style="color:{_C['gray']};font-size:1rem;">Una plataforma, todas las herramientas</p>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
     feats = [
-        ("⚙️", "Procesamiento masivo", "Arrastra carpetas de facturas PDF/XML. TaxOps extrae automáticamente todos los campos DIAN: CUFE, NIT, montos, fechas, tipos."),
-        ("📈", "Prorrateo IVA Art. 490", "Calcula el IVA deducible vs no deducible con base en tus ingresos gravados y excluidos del período. Exporta a Excel listo para presentar."),
-        ("📋", "Exógenas", "Genera el informe de exógenas con clasificación por concepto, NIT y período. Compatible con los formatos de la DIAN."),
-        ("🤖", "Asistente IA contable", "Chatbot especializado que responde preguntas sobre tus facturas: top proveedores, IVA por mes, facturas con errores — en lenguaje natural."),
-        ("✅", "Validación automática", "Detecta errores: CUFE inválido, NIT malformado, totales inconsistentes, duplicados y documentos de mandato/peaje."),
-        ("☁️", "100% en la nube", "Accede desde cualquier navegador. Tus datos seguros en PostgreSQL con aislamiento completo por organización."),
+        ("⚙️", "Procesamiento masivo",
+         "Carga carpetas de facturas PDF/XML. TaxOps extrae automáticamente todos los campos DIAN: CUFE, NIT, montos, fechas, tipos."),
+        ("📈", "Prorrateo IVA Art. 490",
+         "Calcula el IVA deducible vs no deducible con base en tus ingresos gravados y excluidos. Exporta a Excel listo para presentar."),
+        ("📋", "Exógenas",
+         "Genera el informe con clasificación por concepto, NIT y período. Compatible con los formatos de la DIAN."),
+        ("🤖", "Asistente IA contable",
+         "Chatbot especializado: top proveedores, IVA por mes, facturas con errores — en lenguaje natural."),
+        ("✅", "Validación automática",
+         "Detecta errores: CUFE inválido, NIT malformado, totales inconsistentes, duplicados, mandato/peaje."),
+        ("☁️", "100% en la nube",
+         "Accede desde cualquier navegador. Datos seguros con aislamiento completo por organización."),
     ]
 
-    r1 = st.columns(3)
-    r2 = st.columns(3)
-    for i, (icon, title, desc) in enumerate(feats):
-        col = r1[i] if i < 3 else r2[i - 3]
-        col.markdown(f"""
-        <div class="feat-card">
-            <div class="feat-icon">{icon}</div>
-            <div class="feat-title">{title}</div>
-            <div class="feat-text">{desc}</div>
-        </div>
-        """, unsafe_allow_html=True)
-    st.markdown("<br>", unsafe_allow_html=True)
+    card_style = (f"background:{_C['white']};border:1.5px solid {_C['border']};"
+                  f"border-radius:1rem;padding:1.6rem 1.4rem;"
+                  f"box-shadow:0 2px 12px rgba(37,99,235,.07);height:100%;margin:.3rem;")
 
+    for row_feats in [feats[:3], feats[3:]]:
+        cols = st.columns(3)
+        for col, (icon, title, desc) in zip(cols, row_feats):
+            col.markdown(f"""
+            <div style="{card_style}">
+                <div style="font-size:2.2rem;margin-bottom:.7rem;">{icon}</div>
+                <div style="font-size:1rem;font-weight:700;color:{_C['blue_dark']};
+                            margin-bottom:.5rem;">{title}</div>
+                <div style="font-size:.88rem;color:{_C['gray']};line-height:1.65;">{desc}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
+
+
+# ── About ─────────────────────────────────────────────────────────────────────
 
 def _about():
-    st.markdown('<div id="nosotros"></div>', unsafe_allow_html=True)
+    st.markdown(f"""
+    <div style="{_SECTION_W}padding-bottom:2rem;">
+        <div style="text-align:center;margin-bottom:2rem;">
+            <h2 style="font-size:2rem;font-weight:800;color:{_C['blue_dark']};margin:0 0 .4rem;">
+                Quiénes somos
+            </h2>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
     left, right = st.columns([1, 1], gap="large")
 
     with left:
-        st.markdown("""
-        <div class="about-card">
-            <h2 class="land-h2">Quiénes somos</h2>
-            <p style="color:#4A6080;line-height:1.8;font-size:1rem;">
-                <strong>TaxOps</strong> es una plataforma SaaS colombiana construida por y para
-                contadores. Nació de la frustración real de procesar cientos de facturas
-                electrónicas DIAN de forma manual cada cierre mensual.
+        st.markdown(f"""
+        <div style="background:linear-gradient(135deg,{_C['blue_pale']},{_C['peach']});
+                    border-radius:1.2rem;padding:2.2rem;margin:.3rem;">
+            <p style="color:{_C['muted']};line-height:1.85;font-size:1rem;margin:0 0 1rem;">
+                <strong style="color:{_C['blue_dark']};">TaxOps</strong> es una plataforma SaaS
+                colombiana construida por y para contadores. Nació de la frustración real de
+                procesar cientos de facturas DIAN de forma manual cada cierre mensual.
             </p>
-            <p style="color:#4A6080;line-height:1.8;font-size:1rem;">
-                Nuestro equipo combina experiencia contable profunda con tecnología moderna
-                para automatizar el trabajo repetitivo — y devolverle tiempo a los profesionales
-                que realmente lo necesitan.
+            <p style="color:{_C['muted']};line-height:1.85;font-size:1rem;margin:0 0 1rem;">
+                Combinamos experiencia contable profunda con tecnología moderna para automatizar
+                el trabajo repetitivo — y devolverle tiempo a los profesionales que lo necesitan.
             </p>
-            <p style="color:#4A6080;line-height:1.8;font-size:1rem;">
-                📍 Medellín, Colombia<br>
-                ✉️ hola@taxops.co
+            <p style="color:{_C['muted']};font-size:.95rem;margin:0;">
+                📍 Medellín, Colombia &nbsp;·&nbsp; ✉️ hola@taxops.co
             </p>
         </div>
         """, unsafe_allow_html=True)
 
     with right:
-        st.markdown("""
-        <div style="padding:1rem;">
-            <div style="font-size:1rem;color:#6B7A8D;margin-bottom:1.5rem;font-style:italic;">
-                "Construimos TaxOps porque procesábamos facturas manualmente durante semanas.
-                Hoy lo hacemos en minutos."
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
         values = [
             ("🎯", "Especialización", "Conocemos la normativa DIAN por dentro."),
             ("🔒", "Seguridad", "Datos aislados por organización, nunca compartidos."),
@@ -277,92 +222,117 @@ def _about():
         for icon, title, desc in values:
             st.markdown(f"""
             <div style="display:flex;align-items:flex-start;gap:.8rem;
-                        background:#fff;border:1px solid #DDE8F5;border-radius:.8rem;
-                        padding:1rem;margin-bottom:.8rem;">
-                <span style="font-size:1.6rem">{icon}</span>
+                        background:{_C['white']};border:1.5px solid {_C['border']};
+                        border-radius:.8rem;padding:1rem 1.2rem;margin:.35rem .3rem;">
+                <span style="font-size:1.6rem;line-height:1;">{icon}</span>
                 <div>
-                    <div style="font-weight:700;color:#1A3A5C;font-size:.95rem;">{title}</div>
-                    <div style="color:#6B7A8D;font-size:.88rem;">{desc}</div>
+                    <div style="font-weight:700;color:{_C['blue_dark']};font-size:.95rem;">
+                        {title}</div>
+                    <div style="color:{_C['gray']};font-size:.87rem;margin-top:.15rem;">{desc}</div>
                 </div>
             </div>
             """, unsafe_allow_html=True)
 
 
+# ── Plans ─────────────────────────────────────────────────────────────────────
+
 def _plans():
-    st.markdown('<div id="planes"></div>', unsafe_allow_html=True)
-    st.markdown('<div style="text-align:center;padding:2rem 0 1rem">'
-                '<h2 class="land-h2">Planes y precios</h2>'
-                '<p class="land-muted">Sin permanencia · Cancela cuando quieras</p></div>',
-                unsafe_allow_html=True)
+    st.markdown(f"""
+    <div style="{_SECTION}padding-bottom:0;">
+        <div style="text-align:center;margin-bottom:2rem;">
+            <h2 style="font-size:2rem;font-weight:800;color:{_C['blue_dark']};margin:0 0 .4rem;">
+                Planes y precios
+            </h2>
+            <p style="color:{_C['gray']};font-size:.95rem;">
+                Sin permanencia · Cancela cuando quieras
+            </p>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
-    c1, c2, c3 = st.columns(3)
+    plans = [
+        ("Free", "$0", "COP/mes", False, [
+            ("✅", "Hasta 50 facturas/mes"),
+            ("✅", "Procesamiento PDF + XML"),
+            ("✅", "Export Excel"),
+            ("❌", "Sin base de datos"),
+            ("❌", "Sin chatbot IA"),
+            ("❌", "Sin exógenas"),
+        ]),
+        ("Starter", "$300k", "COP/mes", True, [
+            ("✅", "Facturas ilimitadas"),
+            ("✅", "Base de datos PostgreSQL"),
+            ("✅", "Chatbot IA contable"),
+            ("✅", "Exógenas incluidas"),
+            ("✅", "Hasta 3 usuarios"),
+            ("❌", "Sin multi-cliente"),
+        ]),
+        ("Pro", "$600k", "COP/mes", False, [
+            ("✅", "Todo de Starter"),
+            ("✅", "Usuarios ilimitados"),
+            ("✅", "Multi-cliente"),
+            ("✅", "Panel de administración"),
+            ("✅", "Soporte prioritario"),
+            ("✅", "Onboarding personalizado"),
+        ]),
+    ]
 
-    with c1:
-        st.markdown("""
-        <div class="plan-card">
-            <div class="plan-name">Free</div>
-            <div class="plan-price">$0 <span>/mes</span></div>
-            <div class="plan-feature">✅ Hasta 50 facturas/mes</div>
-            <div class="plan-feature">✅ Procesamiento PDF + XML</div>
-            <div class="plan-feature">✅ Export Excel</div>
-            <div class="plan-feature">❌ Sin persistencia DB</div>
-            <div class="plan-feature">❌ Sin chatbot IA</div>
-            <div class="plan-feature">❌ Sin exógenas</div>
+    cols = st.columns(3)
+    for col, (name, price, period, popular, features) in zip(cols, plans):
+        border_color = _C['blue_mid'] if popular else _C['border']
+        shadow = f"0 0 0 4px {_C['blue_light']};border-color:{_C['blue_mid']};" if popular else ""
+        badge = (f'<div style="text-align:center;margin-bottom:.5rem;">'
+                 f'<span style="background:{_C["blue_mid"]};color:white;padding:.25rem .9rem;'
+                 f'border-radius:999px;font-size:.8rem;font-weight:700;">⭐ MÁS POPULAR</span></div>'
+                 if popular else "<div style='height:1.8rem;'></div>")
+        feats_html = "".join(
+            f'<div style="font-size:.88rem;color:{_C["muted"]};padding:.35rem 0;'
+            f'border-bottom:1px solid {_C["border"]};">{em} {txt}</div>'
+            for em, txt in features
+        )
+        col.markdown(f"""
+        <div style="background:{_C['white']};border:2px solid {border_color};
+                    border-radius:1.2rem;padding:1.8rem 1.5rem;text-align:center;
+                    box-shadow:{shadow}margin:.3rem;position:relative;">
+            {badge}
+            <div style="font-size:1.15rem;font-weight:700;color:{_C['blue_dark']};">{name}</div>
+            <div style="font-size:2.2rem;font-weight:900;color:{_C['blue_mid']};margin:.5rem 0;">
+                {price} <span style="font-size:1rem;color:{_C['gray']};font-weight:400;">{period}</span>
+            </div>
+            <div style="margin-top:1rem;text-align:left;">{feats_html}</div>
         </div>
         """, unsafe_allow_html=True)
-
-    with c2:
-        st.markdown("""
-        <div class="plan-card popular">
-            <div class="plan-badge">⭐ MÁS POPULAR</div>
-            <div class="plan-name">Starter</div>
-            <div class="plan-price">$300k <span>COP/mes</span></div>
-            <div class="plan-feature">✅ Facturas ilimitadas</div>
-            <div class="plan-feature">✅ Base de datos PostgreSQL</div>
-            <div class="plan-feature">✅ Chatbot IA contable</div>
-            <div class="plan-feature">✅ Exógenas</div>
-            <div class="plan-feature">✅ Hasta 3 usuarios</div>
-            <div class="plan-feature">❌ Sin multi-cliente</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with c3:
-        st.markdown("""
-        <div class="plan-card">
-            <div class="plan-name">Pro</div>
-            <div class="plan-price">$600k <span>COP/mes</span></div>
-            <div class="plan-feature">✅ Todo de Starter</div>
-            <div class="plan-feature">✅ Usuarios ilimitados</div>
-            <div class="plan-feature">✅ Multi-cliente</div>
-            <div class="plan-feature">✅ Panel de administración</div>
-            <div class="plan-feature">✅ Soporte prioritario ABA</div>
-            <div class="plan-feature">✅ Onboarding personalizado</div>
-        </div>
-        """, unsafe_allow_html=True)
-
     st.markdown("<br>", unsafe_allow_html=True)
 
 
+# ── Auth forms ────────────────────────────────────────────────────────────────
+
 def _auth_forms():
-    st.markdown('<hr class="land-divider">', unsafe_allow_html=True)
-    st.markdown('<div style="text-align:center;padding:1rem 0 .5rem">'
-                '<h2 class="land-h2">Empieza hoy</h2>'
-                '<p class="land-muted">Crea tu cuenta gratuita o inicia sesión</p></div>',
-                unsafe_allow_html=True)
+    st.markdown(f"""
+    <div style="{_SECTION_W}padding-bottom:1rem;">
+        <div style="text-align:center;margin-bottom:1.5rem;">
+            <h2 style="font-size:2rem;font-weight:800;color:{_C['blue_dark']};margin:0 0 .4rem;">
+                Empieza hoy
+            </h2>
+            <p style="color:{_C['gray']};font-size:.95rem;">
+                Crea tu cuenta gratuita o inicia sesión
+            </p>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
     _, center, _ = st.columns([1, 2, 1])
-
     with center:
-        tab_reg, tab_login = st.tabs(["✨ Crear cuenta", "🔐 Iniciar sesión"])
+        tab_reg, tab_login = st.tabs(["✨  Crear cuenta gratis", "🔐  Iniciar sesión"])
 
         with tab_reg:
-            with st.form("landing_register"):
-                firma   = st.text_input("Nombre de la firma contable")
-                email   = st.text_input("Correo electrónico")
-                pwd     = st.text_input("Contraseña", type="password")
-                pwd2    = st.text_input("Confirmar contraseña", type="password")
-                ok      = st.form_submit_button("Crear cuenta gratis", type="primary",
-                                                use_container_width=True)
+            with st.form("f_register", clear_on_submit=True):
+                firma = st.text_input("Nombre de la firma contable")
+                email = st.text_input("Correo electrónico")
+                pwd   = st.text_input("Contraseña (mín. 6 caracteres)", type="password")
+                pwd2  = st.text_input("Confirmar contraseña", type="password")
+                ok    = st.form_submit_button("Crear cuenta gratis",
+                                              type="primary", use_container_width=True)
             if ok:
                 if not firma or not email or not pwd:
                     st.error("Todos los campos son obligatorios.")
@@ -375,42 +345,48 @@ def _auth_forms():
                 else:
                     from db.database import register_org, db_available
                     if not db_available():
-                        st.error("Registro no disponible en modo local sin base de datos.")
+                        st.error("Registro no disponible en modo sin base de datos.")
                     else:
                         try:
                             session = register_org(firma, email, pwd)
                             st.session_state["auth"] = session
-                            st.success("¡Cuenta creada! Redirigiendo...")
                             st.rerun()
                         except Exception as e:
-                            if "duplicate" in str(e).lower() or "unique" in str(e).lower():
+                            if "unique" in str(e).lower() or "duplicate" in str(e).lower():
                                 st.error("Ya existe una cuenta con ese correo.")
                             else:
-                                st.error(f"Error al crear cuenta: {e}")
+                                st.error(f"Error: {e}")
 
         with tab_login:
-            with st.form("landing_login"):
-                lemail = st.text_input("Correo electrónico", key="l_email")
-                lpwd   = st.text_input("Contraseña", type="password", key="l_pwd")
-                lok    = st.form_submit_button("Entrar", type="primary",
-                                               use_container_width=True)
+            with st.form("f_login"):
+                lemail = st.text_input("Correo electrónico")
+                lpwd   = st.text_input("Contraseña", type="password")
+                lok    = st.form_submit_button("Entrar",
+                                               type="primary", use_container_width=True)
             if lok:
                 from db.auth import authenticate
-                session = authenticate(lemail, lpwd)
-                if session:
-                    st.session_state["auth"] = session
+                sess = authenticate(lemail, lpwd)
+                if sess:
+                    st.session_state["auth"] = sess
                     st.rerun()
                 else:
                     st.error("Correo o contraseña incorrectos.")
 
 
+# ── Footer ────────────────────────────────────────────────────────────────────
+
 def _footer():
-    st.markdown("""
-    <div class="land-footer">
-        <div class="land-footer-title">🧾 TaxOps</div>
-        <p>Automatización contable para Colombia</p>
-        <p>📍 Medellín, Colombia &nbsp;·&nbsp; ✉️ hola@taxops.co</p>
-        <p style="margin-top:1rem;font-size:.8rem;color:#6B8BAA;">
+    st.markdown(f"""
+    <div style="background:{_C['blue_dark']};color:#A0B4CC;padding:2.5rem 3rem;
+                margin-top:2rem;text-align:center;width:100%;">
+        <div style="font-size:1.4rem;font-weight:800;color:white;margin-bottom:.5rem;">
+            🧾 TaxOps
+        </div>
+        <p style="margin:.3rem 0;">Automatización contable para Colombia</p>
+        <p style="margin:.3rem 0;">
+            📍 Medellín, Colombia &nbsp;·&nbsp; ✉️ hola@taxops.co
+        </p>
+        <p style="margin-top:1.2rem;font-size:.8rem;color:#6B8BAA;">
             © 2026 TaxOps · Todos los derechos reservados
         </p>
     </div>
@@ -420,16 +396,13 @@ def _footer():
 # ── Public entry point ────────────────────────────────────────────────────────
 
 def show_landing() -> None:
-    """Render the full public landing page. Call from Home.py when not authenticated."""
-    st.markdown(_CSS, unsafe_allow_html=True)
+    """Render the full public landing page."""
+    st.markdown(_LAYOUT_CSS, unsafe_allow_html=True)
     _nav()
     _hero()
-    st.markdown("<br>", unsafe_allow_html=True)
     _stats()
-    st.markdown("<br><br>", unsafe_allow_html=True)
     _features()
     _about()
-    st.markdown("<br><br>", unsafe_allow_html=True)
     _plans()
     _auth_forms()
     _footer()
