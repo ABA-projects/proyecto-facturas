@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import tempfile
 from pathlib import Path
 
@@ -12,6 +11,7 @@ from pipeline.excel_writer import write_excel
 from services.processor import procesar, parse_ingresos
 from utils.theme import apply_theme, theme_topright
 from utils.sidebar_chat import render_sidebar_chat
+from utils.org_id import get_org_id
 
 apply_theme()
 theme_topright()
@@ -70,7 +70,7 @@ if ready and st.button("⚙️ Procesar", type="primary"):
     def on_progress(i, total, nombre):
         prog.progress((i + 1) / max(total, 1), text=f"Procesando {nombre}…")
 
-    org_id = os.environ.get("TAXOPS_ORG_ID", "00000000-0000-0000-0000-000000000000") if guardar_db else None
+    org_id = get_org_id(st.session_state) if guardar_db else None
 
     if modo == "📤 Upload archivos":
         with tempfile.TemporaryDirectory() as tmp:

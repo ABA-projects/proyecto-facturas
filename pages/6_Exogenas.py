@@ -10,6 +10,7 @@ from services.processor_exogenas import procesar_exogenas
 from exogenas.excel_writer import write_1003
 from utils.theme import apply_theme, theme_topright
 from utils.sidebar_chat import render_sidebar_chat
+from utils.org_id import get_org_id
 
 apply_theme()
 theme_topright()
@@ -65,7 +66,8 @@ if uploaded and st.button("⚙️ Procesar certificados", type="primary", use_co
             pct = int((i + 1) / total * 100)
             progress_bar.progress(pct, text=f"[{i+1}/{total}] {name}")
 
-        resultado = procesar_exogenas(paths, on_progress=_on_progress)
+        org_id = get_org_id(st.session_state)
+        resultado = procesar_exogenas(paths, on_progress=_on_progress, org_id=org_id)
         progress_bar.empty()
 
         st.session_state["exogenas_resultado"] = resultado
