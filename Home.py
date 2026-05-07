@@ -46,22 +46,39 @@ if login_required():
             st.divider()
 
 # ── Multi-page navigation ──────────────────────────────────────────────────────
-pg = st.navigation(
-    {
-        "": [
-            st.Page("pages/0_Inicio.py", title="Inicio", icon="🏠", default=True),
-        ],
-        "Facturas DIAN": [
-            st.Page("pages/1_Procesar.py",      title="Procesar",      icon="⚙️"),
-            st.Page("pages/3_Validacion.py",    title="Validación",    icon="✅"),
-            st.Page("pages/4_Prorrateo_IVA.py", title="Prorrateo IVA", icon="📈"),
-            st.Page("pages/5_Chatbot.py",       title="Chatbot",       icon="🤖"),
-        ],
-        "Exógenas": [
-            st.Page("pages/6_Exogenas.py",          title="Procesar",  icon="📋"),
-            st.Page("pages/7_Exogenas_Analitica.py", title="Analítica", icon="📊"),
-            st.Page("pages/8_Exogenas_Chatbot.py",   title="Chatbot",   icon="🤖"),
-        ],
-    }
-)
+_auth = get_auth_session(st.session_state) if login_required() else None
+_is_admin = _auth and _auth.get("role") in ("owner", "admin")
+
+_pages: dict = {
+    "": [
+        st.Page("pages/0_Inicio.py", title="Inicio", icon="🏠", default=True),
+    ],
+    "Facturas DIAN": [
+        st.Page("pages/1_Procesar.py",      title="Procesar",      icon="⚙️"),
+        st.Page("pages/3_Validacion.py",    title="Validación",    icon="✅"),
+        st.Page("pages/4_Prorrateo_IVA.py", title="Prorrateo IVA", icon="📈"),
+        st.Page("pages/5_Chatbot.py",       title="Chatbot",       icon="🤖"),
+    ],
+    "Exógenas": [
+        st.Page("pages/6_Exogenas.py",           title="Procesar",  icon="📋"),
+        st.Page("pages/7_Exogenas_Analitica.py", title="Analítica", icon="📊"),
+        st.Page("pages/8_Exogenas_Chatbot.py",   title="Chatbot",   icon="🤖"),
+    ],
+}
+
+if _auth:
+    _pages["Mi cuenta"] = [
+        st.Page("pages/14_Mi_Perfil.py", title="Mi perfil", icon="👤"),
+    ]
+
+if _is_admin:
+    _pages["Administración"] = [
+        st.Page("pages/10_Admin_Dashboard.py",    title="Dashboard",    icon="📊"),
+        st.Page("pages/9_Admin.py",               title="Usuarios",     icon="👥"),
+        st.Page("pages/11_Admin_Clientes.py",     title="Clientes",     icon="🏢"),
+        st.Page("pages/12_Admin_Actividad.py",    title="Actividad",    icon="📋"),
+        st.Page("pages/13_Admin_Organizacion.py", title="Organización", icon="🏛️"),
+    ]
+
+pg = st.navigation(_pages)
 pg.run()

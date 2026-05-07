@@ -165,6 +165,188 @@ def get_autorretenedores_nits() -> set[str]:
         return set()
 
 
+# ── User management ───────────────────────────────────────────────────────────
+
+def list_users(org_id: str) -> list[dict]:
+    """Return all users for an org, ordered by created_at."""
+    try:
+        from sqlalchemy import text
+        with get_db() as db:
+            rows = db.execute(
+                text("""
+                    SELECT id, email, full_name, role, active, created_at, last_login_at
+                    FROM users
+                    WHERE org_id = :org_id
+                    ORDER BY created_at
+                """),
+                {"org_id": org_id},
+            ).fetchall()
+        return [dict(r._mapping) for r in rows]
+    except Exception:
+        return []
+
+
+def create_user(org_id: str, email: str, password: str, role: str = "contador", full_name: str = "") -> dict:
+    """Create a new user in the given org. Returns the created user dict."""
+    from db.auth import hash_password
+    from sqlalchemy import text
+    import uuid
+
+    user_id = str(uuid.uuid4())
+    hashed = hash_password(password)
+    with get_db() as db:
+        db.execute(
+            text("""
+                INSERT INTO users (id, org_id, email, hashed_password, role, full_name)
+                VALUES (:id, :org_id, :email, :hashed_password, :role, :full_name)
+            """),
+            {
+                "id": user_id,
+                "org_id": org_id,
+                "email": email.strip().lower(),
+                "hashed_password": hashed,
+                "role": role,
+                "full_name": full_name.strip(),
+            },
+        )
+    return {"id": user_id, "email": email, "role": role}
+
+
+def set_user_active(user_id: str, org_id: str, active: bool) -> None:
+    """Enable or disable a user. org_id scopes the update to prevent cross-org edits."""
+    from sqlalchemy import text
+    with get_db() as db:
+        db.execute(
+            text("UPDATE users SET active = :active WHERE id = :user_id AND org_id = :org_id"),
+            {"active": active, "user_id": user_id, "org_id": org_id},
+        )
+
+
+# ── Dashboard stats ───────────────────────────────────────────────────────────
+
+def get_dashboard_stats(org_id: str) -> dict:
+    """Return KPI counts for the admin dashboard."""
+    try:
+        from sqlalchemy import text
+        with get_db() as db:
+            row = db.execute(text("""
+                SELECT
+                    COUNT(*) FILTER (WHERE periodo = TO_CHAR(NOW(), 'YYYY-MM'))      AS facturas_mes_actual,
+                    COUNT(*) FILTER (WHERE periodo = TO_CHAR(NOW() - INTERVAL '1 month', 'YYYY-MM')) AS facturas_mes_anterior,
+                    COUNT(*)                                                           AS facturas_total
+                FROM invoices WHERE org_id = :org_id
+            """), {"org_id": org_id}).fetchone()
+            usuarios = db.execute(text(
+                "SELECT COUNT(*) FROM users WHERE org_id = :org_id AND active = TRUE"
+            ), {"org_id": org_id}).fetchone()
+            clientes = db.execute(text(
+                "SELECT COUNT(*) FROM clients WHERE org_id = :org_id AND active = TRUE"
+            ), {"org_id": org_id}).fetchone()
+            ultima = db.execute(text(
+                "SELECT MAX(started_at) FROM processing_sessions WHERE org_id = :org_id"
+            ), {"org_id": org_id}).fetchone()
+        return {
+            "facturas_mes_actual":   int(row[0] or 0),
+            "facturas_mes_anterior": int(row[1] or 0),
+            "facturas_total":        int(row[2] or 0),
+            "usuarios_activos":      int(usuarios[0] or 0),
+            "clientes_activos":      int(clientes[0] or 0),
+            "ultima_actividad":      ultima[0],
+        }
+    except Exception:
+        return {"facturas_mes_actual": 0, "facturas_mes_anterior": 0, "facturas_total": 0,
+                "usuarios_activos": 0, "clientes_activos": 0, "ultima_actividad": None}
+
+
+# ── Client management ──────────────────────────────────────────────────────────
+
+def list_clients(org_id: str) -> list[dict]:
+    try:
+        from sqlalchemy import text
+        with get_db() as db:
+            rows = db.execute(text("""
+                SELECT id, nit, razon_social, active, created_at
+                FROM clients WHERE org_id = :org_id ORDER BY razon_social
+            """), {"org_id": org_id}).fetchall()
+        return [dict(r._mapping) for r in rows]
+    except Exception:
+        return []
+
+
+def create_client(org_id: str, nit: str, razon_social: str) -> None:
+    from sqlalchemy import text
+    import uuid
+    with get_db() as db:
+        db.execute(text("""
+            INSERT INTO clients (id, org_id, nit, razon_social)
+            VALUES (:id, :org_id, :nit, :razon_social)
+        """), {"id": str(uuid.uuid4()), "org_id": org_id,
+               "nit": nit.strip(), "razon_social": razon_social.strip()})
+
+
+def set_client_active(client_id: str, org_id: str, active: bool) -> None:
+    from sqlalchemy import text
+    with get_db() as db:
+        db.execute(text(
+            "UPDATE clients SET active = :active WHERE id = :id AND org_id = :org_id"
+        ), {"active": active, "id": client_id, "org_id": org_id})
+
+
+# ── Activity log ───────────────────────────────────────────────────────────────
+
+def list_processing_sessions(org_id: str, limit: int = 50) -> list[dict]:
+    try:
+        from sqlalchemy import text
+        with get_db() as db:
+            rows = db.execute(text("""
+                SELECT ps.id, ps.started_at, ps.finished_at, ps.status,
+                       ps.total_archivos, ps.procesados, ps.errores, ps.nuevas, ps.duplicadas,
+                       u.email AS usuario
+                FROM processing_sessions ps
+                LEFT JOIN users u ON ps.user_id = u.id
+                WHERE ps.org_id = :org_id
+                ORDER BY ps.started_at DESC
+                LIMIT :limit
+            """), {"org_id": org_id, "limit": limit}).fetchall()
+        return [dict(r._mapping) for r in rows]
+    except Exception:
+        return []
+
+
+# ── Organization ───────────────────────────────────────────────────────────────
+
+def get_org(org_id: str) -> dict | None:
+    try:
+        from sqlalchemy import text
+        with get_db() as db:
+            row = db.execute(text(
+                "SELECT id, name, slug, nit, plan, active, created_at FROM organizations WHERE id = :org_id"
+            ), {"org_id": org_id}).fetchone()
+        return dict(row._mapping) if row else None
+    except Exception:
+        return None
+
+
+def update_org(org_id: str, name: str, nit: str) -> None:
+    from sqlalchemy import text
+    with get_db() as db:
+        db.execute(text(
+            "UPDATE organizations SET name = :name, nit = :nit WHERE id = :org_id"
+        ), {"name": name.strip(), "nit": nit.strip(), "org_id": org_id})
+
+
+# ── Password change ────────────────────────────────────────────────────────────
+
+def update_user_password(user_id: str, org_id: str, new_password: str) -> None:
+    from db.auth import hash_password
+    from sqlalchemy import text
+    hashed = hash_password(new_password)
+    with get_db() as db:
+        db.execute(text("""
+            UPDATE users SET hashed_password = :hashed WHERE id = :user_id AND org_id = :org_id
+        """), {"hashed": hashed, "user_id": user_id, "org_id": org_id})
+
+
 # ── Cleanup helpers (used by future admin UI) ─────────────────────────────────
 
 def preview_cleanup(org_id: str, meses_a_conservar: int = 3) -> dict:
