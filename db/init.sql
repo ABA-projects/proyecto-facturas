@@ -161,3 +161,23 @@ CREATE TRIGGER trg_ingresos_updated BEFORE UPDATE ON ingresos_prorateo
 INSERT INTO organizations (slug, name, plan)
 VALUES ('demo', 'TaxOps Demo', 'pro')
 ON CONFLICT (slug) DO NOTHING;
+
+-- ────────────────────────────────────────────────────────────
+-- EXOGENAS_RESULTS — resultados de procesamiento de exógenas
+-- ────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS exogenas_results (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    org_id          UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    session_id      UUID REFERENCES processing_sessions(id),
+    anio            INTEGER NOT NULL,
+    concepto        TEXT,
+    nit             TEXT,
+    razon_social    TEXT,
+    base            NUMERIC(18,2),
+    retencion       NUMERIC(18,2),
+    porcentaje      NUMERIC(5,2),
+    raw_row         JSONB,
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE (org_id, nit, concepto, anio)
+);
+CREATE INDEX IF NOT EXISTS ix_exogenas_results_org_id ON exogenas_results(org_id);
