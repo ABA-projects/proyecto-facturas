@@ -5,7 +5,8 @@ pandas>=2.0.0
 openpyxl>=3.1.5
 streamlit>=1.36.0
 groq>=0.11
-# Base de datos (PostgreSQL — solo necesario con Docker)
 sqlalchemy>=2.0
 psycopg2-binary>=2.9
+streamlit-authenticator==0.3.3
+bcrypt>=4.0
 python-dotenv>=1.0
