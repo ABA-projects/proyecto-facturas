@@ -3,6 +3,7 @@
 import streamlit as st
 
 from home_gate import login_required, get_auth_session
+from utils.superadmin import is_superadmin
 
 st.set_page_config(
     page_title="TaxOps · Automatización Contable Colombia",
@@ -47,7 +48,8 @@ if login_required():
 
 # ── Multi-page navigation ──────────────────────────────────────────────────────
 _auth = get_auth_session(st.session_state) if login_required() else None
-_is_admin = _auth and _auth.get("role") in ("owner", "admin")
+_is_admin      = _auth and _auth.get("role") in ("owner", "admin")
+_is_superadmin = _auth and is_superadmin(_auth["email"])
 
 _pages: dict = {
     "": [
@@ -78,6 +80,11 @@ if _is_admin:
         st.Page("pages/11_Admin_Clientes.py",     title="Clientes",     icon="🏢"),
         st.Page("pages/12_Admin_Actividad.py",    title="Actividad",    icon="📋"),
         st.Page("pages/13_Admin_Organizacion.py", title="Organización", icon="🏛️"),
+    ]
+
+if _is_superadmin:
+    _pages["🛡️ Super Admin"] = [
+        st.Page("pages/15_Superadmin.py", title="Consola de plataforma", icon="🛡️"),
     ]
 
 pg = st.navigation(_pages)

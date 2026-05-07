@@ -393,3 +393,80 @@ def execute_cleanup(org_id: str, meses_a_conservar: int = 3) -> int:
             return result.rowcount
     except Exception:
         return 0
+
+
+# ── Super-admin (cross-tenant, no org_id scope) ────────────────────────────────
+
+def superadmin_global_stats() -> dict:
+    """Platform-wide KPIs. No org scoping — only for the platform operator."""
+    try:
+        from sqlalchemy import text
+        with get_db() as db:
+            orgs = db.execute(text(
+                "SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE active) AS activas FROM organizations"
+            )).fetchone()
+            users = db.execute(text("SELECT COUNT(*) FROM users")).fetchone()
+            invoices = db.execute(text(
+                "SELECT COUNT(*) AS total, "
+                "COUNT(*) FILTER (WHERE periodo = TO_CHAR(NOW(),'YYYY-MM')) AS este_mes "
+                "FROM invoices"
+            )).fetchone()
+        return {
+            "orgs_total":    int(orgs[0] or 0),
+            "orgs_activas":  int(orgs[1] or 0),
+            "usuarios_total": int(users[0] or 0),
+            "facturas_total": int(invoices[0] or 0),
+            "facturas_mes":   int(invoices[1] or 0),
+        }
+    except Exception:
+        return {"orgs_total": 0, "orgs_activas": 0, "usuarios_total": 0,
+                "facturas_total": 0, "facturas_mes": 0}
+
+
+def superadmin_list_orgs() -> list[dict]:
+    """All organizations with usage metrics."""
+    try:
+        from sqlalchemy import text
+        with get_db() as db:
+            rows = db.execute(text("""
+                SELECT
+                    o.id, o.name, o.slug, o.nit, o.plan, o.active, o.created_at,
+                    COUNT(DISTINCT u.id)  AS usuarios,
+                    COUNT(DISTINCT i.id)  AS facturas,
+                    COUNT(DISTINCT c.id)  AS clientes,
+                    MAX(ps.started_at)    AS ultima_actividad
+                FROM organizations o
+                LEFT JOIN users              u  ON u.org_id = o.id
+                LEFT JOIN invoices           i  ON i.org_id = o.id
+                LEFT JOIN clients            c  ON c.org_id = o.id
+                LEFT JOIN processing_sessions ps ON ps.org_id = o.id
+                GROUP BY o.id, o.name, o.slug, o.nit, o.plan, o.active, o.created_at
+                ORDER BY o.created_at DESC
+            """)).fetchall()
+        return [dict(r._mapping) for r in rows]
+    except Exception:
+        return []
+
+
+def superadmin_set_org_active(org_id: str, active: bool) -> None:
+    from sqlalchemy import text
+    with get_db() as db:
+        db.execute(text(
+            "UPDATE organizations SET active = :active WHERE id = :org_id"
+        ), {"active": active, "org_id": org_id})
+
+
+def superadmin_set_org_plan(org_id: str, plan: str) -> None:
+    from sqlalchemy import text
+    with get_db() as db:
+        db.execute(text(
+            "UPDATE organizations SET plan = :plan WHERE id = :org_id"
+        ), {"plan": plan, "org_id": org_id})
+
+
+def superadmin_org_detail(org_id: str) -> dict:
+    """Users + last 20 sessions for any org (cross-tenant drill-down)."""
+    users    = list_users(org_id)
+    sessions = list_processing_sessions(org_id, limit=20)
+    org      = get_org(org_id)
+    return {"org": org, "users": users, "sessions": sessions}
