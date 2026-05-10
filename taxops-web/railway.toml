@@ -1,0 +1,20 @@
+# railway.toml — Servicio: taxops-web
+# Railway lee este archivo cuando el Root Directory del servicio es taxops-web/
+# Docs: https://docs.railway.com/reference/config-as-code
+
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+
+# NEXT_PUBLIC_API_URL se hornea en el bundle de Next.js en build time.
+# Configúrala como variable en el dashboard de Railway con la URL real de la API.
+# Después de cambiarla, Railway hace rebuild automático.
+#
+# En el dashboard → taxops-web → Variables → Add:
+#   NEXT_PUBLIC_API_URL = https://<tu-api>.railway.app
+
+[deploy]
+healthcheckPath = "/"
+healthcheckTimeout = 30
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3

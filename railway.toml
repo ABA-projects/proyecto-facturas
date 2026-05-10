@@ -1,0 +1,20 @@
+# railway.toml — Servicio: taxops-api
+# Railway lee este archivo cuando el Root Directory del servicio es /
+# Docs: https://docs.railway.com/reference/config-as-code
+
+[build]
+builder = "dockerfile"
+dockerfilePath = "api/Dockerfile-api"
+
+[deploy]
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3
+
+# Variables no-secretas que van bien en el repo
+# Las secretas (DATABASE_URL, SECRET_KEY, GROQ_API_KEY) van solo en Railway dashboard
+[deploy.environmentVariables]
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = "30"
+REFRESH_TOKEN_EXPIRE_DAYS = "7"
