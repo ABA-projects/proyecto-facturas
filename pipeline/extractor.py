@@ -152,9 +152,19 @@ def _detect_doc_type(text: str, filename: str) -> str:
     return "Factura Electrónica"
 
 
-def _calc_retencion(subtotal: float, nit_emisor: str) -> float:
-    """Retención en la fuente = subtotal × 2.5%. Cero si el emisor es autorretenedor."""
+def _calc_retencion(subtotal: float, nit_emisor: str,
+                    base19: float = 0.0, base5: float = 0.0) -> float:
+    """Retención en la fuente = subtotal × 2.5%.
+    Cero si el emisor es autorretenedor.
+    Cero si (base_19 + base_5) ≤ 524.000 (tope mínimo Art. 383 ET ~ 4 UVT 2025).
+    """
     if nit_emisor.strip() in _AUTORRETENEDORES:
+        return 0.0
+    # Si la sumatoria de bases IVA gravadas no supera el tope → no hay retención
+    TOPE_RETENCION = 524_000.0
+    base_gravada = base19 + base5
+    # Si hay bases conocidas y no superan el tope, no retener
+    if base_gravada > 0 and base_gravada <= TOPE_RETENCION:
         return 0.0
     return round(subtotal * 0.025, 2)
 
@@ -280,7 +290,7 @@ def extract_xml(path: Path) -> dict:
         "iva_5":             iva5_signed,
         "no_gravado":        no_grav,
         "total":             round(sign * total, 2),
-        "retencion_fuente":  _calc_retencion(abs(subtotal_signed), nit_emisor),
+        "retencion_fuente":  _calc_retencion(abs(subtotal_signed), nit_emisor, base19, base5),
         "fuente":            "XML",
     }
 
@@ -514,7 +524,7 @@ def _extract_from_text(path: Path, text: str) -> dict:
         "no_gravado":        no_grav,
         "total":             round(sign * total, 2),
         # Nota Crédito no genera nueva retención (la retención fue de la factura original)
-        "retencion_fuente":  0.0 if doc_type == "Nota Crédito" else _calc_retencion(abs(subtotal_signed), nit_emisor),
+        "retencion_fuente":  0.0 if doc_type == "Nota Crédito" else _calc_retencion(abs(subtotal_signed), nit_emisor, base19, base5),
         "fuente":            path.suffix.upper().lstrip("."),
     }
 

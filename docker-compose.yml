@@ -1,9 +1,9 @@
-# TaxOps — docker-compose para desarrollo local y staging
-# Servicios: app (Streamlit), db (PostgreSQL 16), adminer (DB UI)
+# TaxOps — docker-compose
+# Servicios: api (FastAPI), web (Next.js), db (PostgreSQL 16), adminer
 
 services:
 
-  # ── PostgreSQL 16 ────────────────────────────────────────────────────────────
+  # ── PostgreSQL 16 ─────────────────────────────────────────────────────────
   db:
     image: postgres:16-alpine
     container_name: taxops_db
@@ -23,7 +23,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # ── Adminer — UI ligera para PostgreSQL ──────────────────────────────────────
+  # ── Adminer — UI para PostgreSQL ─────────────────────────────────────────
   adminer:
     image: adminer:4
     container_name: taxops_adminer
@@ -36,28 +36,25 @@ services:
       db:
         condition: service_healthy
 
-  # ── TaxOps Streamlit App ─────────────────────────────────────────────────────
-  app:
+  # ── FastAPI backend ───────────────────────────────────────────────────────
+  api:
     build:
       context: .
-      dockerfile: Dockerfile
-    container_name: taxops_app
+      dockerfile: api/Dockerfile-api
+    container_name: taxops_api
     restart: unless-stopped
     ports:
-      - "8501:8501"
+      - "8000:8000"
     environment:
-      # DB connection (usada por db/database.py)
-      DATABASE_URL: postgresql://${POSTGRES_USER:-taxops}:${POSTGRES_PASSWORD:-taxops_dev_pass}@db:5432/${POSTGRES_DB:-taxops}
-      # Groq API key para el chatbot
+      DATABASE_URL: ${DATABASE_URL:-postgresql://taxops:taxops_local_2026@db:5432/taxops}
+      SECRET_KEY: ${SECRET_KEY:-taxops_jwt_secret_2026_cambiar_en_produccion_min32}
+      ALGORITHM: HS256
+      ACCESS_TOKEN_EXPIRE_MINUTES: 30
+      REFRESH_TOKEN_EXPIRE_DAYS: 7
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000}
       GROQ_API_KEY: ${GROQ_API_KEY:-}
-      # Org demo (slug=demo en tabla organizations)
-      TAXOPS_ORG_ID: ${TAXOPS_ORG_ID:-48238725-696f-48ea-ba65-f5b6be84efab}
-      # Entorno
-      TAXOPS_ENV: ${TAXOPS_ENV:-development}
+      TAXOPS_SUPERADMIN_EMAILS: ${TAXOPS_SUPERADMIN_EMAILS:-}
     volumes:
-      # Código fuente montado en vivo (hot-reload sin rebuild)
-      - .:/app
-      # Monta carpeta de facturas para modo carpeta local
       - ./facturas:/app/facturas
       - ./outputs:/app/outputs
       - ./logs:/app/logs
@@ -65,12 +62,31 @@ services:
       db:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 30s
       timeout: 10s
-      start_period: 30s
+      start_period: 20s
       retries: 3
+
+  # ── Next.js frontend ──────────────────────────────────────────────────────
+  web:
+    build:
+      context: ./taxops-web
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    container_name: taxops_web
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      INTERNAL_API_URL: http://api:8000
+    depends_on:
+      api:
+        condition: service_healthy
 
 volumes:
   postgres_data:
     driver: local
+

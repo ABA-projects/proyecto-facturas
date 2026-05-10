@@ -201,6 +201,27 @@ def _clean_nit(raw: str) -> str:
 _RE_BARE_NIT_DV  = re.compile(r"^(\d{7,12})[-–](\d)$")
 _RE_BARE_NIT     = re.compile(r"^(\d{7,12})[-–]?$")   # acepta trailing dash (890905154-)
 _RE_RAZON_LABEL  = re.compile(r"razón?\s+social[^:]{0,20}:\s*([^\n]{3,70})", re.I)
+# Líneas de paginación a ignorar al buscar razón social
+_RE_PAGINA       = re.compile(r"^p[aá]g(?:ina)?[.:]?\s*\d+$", re.I)
+# Líneas que parecen dirección (no son razón social)
+_RE_ADDR_START   = re.compile(
+    r"^(?:CL|CR|CRA|KR|AK|AV|KM|VDA|CARRERA|CALLE|DIAGONAL|TRANSVERSAL|AVENIDA|BARRIO|SECTOR)\b",
+    re.I,
+)
+
+
+def _is_junk_line(ln: str) -> bool:
+    """Retorna True si la línea es paginación, dirección o demasiado corta para ser razón social."""
+    if not ln or len(ln) < 3:
+        return True
+    if _RE_PAGINA.match(ln):
+        return True
+    if _RE_ADDR_START.match(ln):
+        return True
+    # Línea que es sólo caracteres de guión/relleno
+    if re.match(r"^[-=_*·.]{4,}$", ln):
+        return True
+    return False
 
 
 def _extract_emisor(text: str) -> tuple[str, str, str]:
@@ -241,12 +262,17 @@ def _extract_emisor(text: str) -> tuple[str, str, str]:
 
     razon = ""
     if nit_line_idx > 0:
-        candidate = lines[nit_line_idx - 1]
-        # Si el NIT está en la misma línea que la razón social (NIT: 900xxx-1 Tel:...)
-        if _RE_NIT_DV.search(candidate) or _RE_NIT_NODV.search(candidate):
-            razon = re.split(r"N\.?I\.?T", candidate, flags=re.I)[0].strip()
-        else:
+        # Buscar hacia atrás la primera línea válida (saltando paginación, direcciones, etc.)
+        for look_back in range(1, min(nit_line_idx + 1, 6)):
+            candidate = lines[nit_line_idx - look_back]
+            if _RE_NIT_DV.search(candidate) or _RE_NIT_NODV.search(candidate):
+                # El NIT está en la misma línea que la razón social
+                razon = re.split(r"N\.?I\.?T", candidate, flags=re.I)[0].strip()
+                break
+            if _is_junk_line(candidate):
+                continue
             razon = candidate
+            break
     elif nit_line_idx == 0 and len(lines) > 1:
         razon = lines[1] if not _RE_NIT_NODV.search(lines[1]) else ""
 
@@ -294,6 +320,34 @@ def _cert_type(text: str) -> str:
 
 # ── Concepto 1003 ─────────────────────────────────────────────────────────────
 
+# Conceptos 1303 (servicios) — tasas 1%, 3.5%, 4%, 6% según Art. 392 ET
+_TASAS_SERVICIOS = {1.0, 1.5, 2.0, 3.5, 4.0, 6.0, 10.0, 11.0}
+_TASAS_COMPRAS   = {0.5, 1.0, 1.5, 2.5, 3.0, 3.5}  # compras puede ser 2.5%
+
+# Mapa de palabras clave de concepto → código DIAN
+_CONCEPTO_MAP = [
+    # servicios (1303) — orden específico antes de compras
+    (re.compile(r"HONORARIOS|HONORARIO", re.I),                   "1303"),
+    (re.compile(r"SERVICIOS?\b", re.I),                           "1303"),
+    (re.compile(r"ARRENDAMIENTO|RENTA\s+DE\s+BIEN", re.I),        "1303"),
+    (re.compile(r"COMISIONES?", re.I),                            "1303"),
+    # compras / general (1302)
+    (re.compile(r"COMPRAS?|COMPRA\s+GENERAL", re.I),              "1302"),
+    (re.compile(r"VENTAS?", re.I),                                 "1302"),
+]
+
+
+def _pct_to_concepto(keyword: str, pct: float) -> str:
+    """Mapea (palabra del concepto, porcentaje) → código DIAN."""
+    for pattern, code in _CONCEPTO_MAP:
+        if pattern.search(keyword):
+            return code
+    # Si la tasa es típica de servicios (>= 3.5%), prefiere 1303
+    if pct in _TASAS_SERVICIOS and pct >= 3.5:
+        return "1303"
+    return "1302"
+
+
 def _detect_concepto(text: str, tipo_cert: str) -> tuple[str, float]:
     """Retorna (concepto_1003, porcentaje). concepto: '1302','1303','1309','ICA'."""
     if tipo_cert == "ICA":
@@ -305,10 +359,71 @@ def _detect_concepto(text: str, tipo_cert: str) -> tuple[str, float]:
     pct_m = re.search(r"(\d+[.,]\d+)\s*%", text)
     pct = float(pct_m.group(1).replace(",", ".")) if pct_m else 0.0
 
-    if re.search(r"\bSERVICIOS?\b", text, re.I) and pct >= 3.5:
-        return "1303", pct
+    # Detectar palabra clave de concepto en el texto
+    for pattern, code in _CONCEPTO_MAP:
+        if pattern.search(text):
+            return code, pct if pct else (4.0 if code == "1303" else 2.5)
 
     return "1302", pct if pct else 2.5
+
+
+# ── Extracción de filas múltiples de conceptos ────────────────────────────────
+
+# Tabla "Concepto LABEL PCT%  BASE  RETENCIÓN" — múltiples filas
+_RE_MULTI_ROW = re.compile(
+    r"(?P<label>[A-Za-záéíóúÁÉÍÓÚñÑ][^\n\t]{2,50}?)\s+"
+    r"(?P<pct>[\d]+[.,][\d]{1,4})\s*%\s+"
+    r"(?P<base>[\d.,]{4,}(?:\.\d{2})?)\s+%?\s*"
+    r"(?P<ret>[\d.,]{3,})",
+    re.M,
+)
+
+# Tabla sin porcentaje explícito: "CONCEPTO  BASE  RETENCIÓN"
+_RE_MULTI_ROW_NOPCT = re.compile(
+    r"(?P<label>COMPRAS?|SERVICIOS?|HONORARIOS?|ARRENDAMIENTOS?|COMISIONES?|VENTAS?)[^\n]{0,40}\s+"
+    r"(?P<base>[\d.,]{4,}(?:\.\d{2})?)\s+"
+    r"(?P<ret>[\d.,]{3,})",
+    re.M | re.I,
+)
+
+
+def _extract_concepto_rows(
+    text: str, tipo_cert: str
+) -> list[tuple[str, float, float, float]]:
+    """
+    Intenta encontrar todas las filas de conceptos en el certificado.
+    Retorna lista de (concepto_dian, porcentaje, base, retencion).
+    Si no encuentra filas múltiples, retorna lista vacía.
+    """
+    if tipo_cert in ("ICA", "IVA"):
+        return []
+
+    rows: list[tuple[str, float, float, float]] = []
+
+    # 1. Tabla con porcentaje explícito
+    for m in _RE_MULTI_ROW.finditer(text):
+        label = m.group("label").strip()
+        pct   = float(m.group("pct").replace(",", "."))
+        base  = _parse_money(m.group("base"))
+        ret   = _parse_money(m.group("ret"))
+        if base > 100 and ret > 0 and base > ret:
+            concepto = _pct_to_concepto(label, pct)
+            rows.append((concepto, pct, base, ret))
+
+    if rows:
+        return rows
+
+    # 2. Tabla sin porcentaje (compras/servicios sin tasa)
+    for m in _RE_MULTI_ROW_NOPCT.finditer(text):
+        label = m.group("label").strip()
+        base  = _parse_money(m.group("base"))
+        ret   = _parse_money(m.group("ret"))
+        if base > 100 and ret > 0 and base > ret:
+            concepto = _pct_to_concepto(label, 0.0)
+            pct = round(ret / base * 100, 2) if base else 0.0
+            rows.append((concepto, pct, base, ret))
+
+    return rows
 
 
 # ── Extracción de montos ──────────────────────────────────────────────────────
@@ -456,68 +571,124 @@ def _extract_ciudad_retencion(text: str) -> str:
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
-def extract_one(path: "str | Path") -> dict:
-    """
-    Extrae datos de un certificado de retención PDF.
-
-    Returns dict con campos:
-        razon_social, nit, dv, tipo_doc, direccion,
-        ciudad_retencion, concepto, base, retencion,
-        porcentaje, tipo_cert, fuente, archivo, error
-    """
-    path = Path(path)
-    suf = path.suffix.lower()
-    base_dict: dict = {
+def _base_row(path: Path, error: str = "") -> dict:
+    """Dict base con todos los campos requeridos."""
+    return {
         "razon_social": "", "nit": "", "dv": "", "tipo_doc": "31",
         "direccion": "", "ciudad_retencion": "", "concepto": "", "base": 0.0,
         "retencion": 0.0, "porcentaje": 0.0, "tipo_cert": "",
-        "fuente": suf.upper().lstrip("."),
-        "archivo": path.name, "error": "",
+        "validacion_tasa": 0.0,  # retencion/base × 100 para verificar
+        "es_escaneado": False,
+        "fuente": "PDF", "archivo": path.name, "error": error,
     }
 
-    try:
-        if suf in (".docx", ".doc"):
-            from docx import Document
-            doc = Document(str(path))
-            parts = []
-            for para in doc.paragraphs:
-                if para.text.strip():
-                    parts.append(para.text)
-            for table in doc.tables:
-                for row in table.rows:
-                    parts.append("\t".join(cell.text for cell in row.cells))
-            text = "\n".join(parts)
-        else:
-            with pdfplumber.open(path) as pdf:
-                text = "\n".join(page.extract_text() or "" for page in pdf.pages)
-    except Exception as e:
-        base_dict["error"] = f"No se pudo abrir: {e}"
-        return base_dict
 
-    if not text.strip():
-        base_dict["error"] = f"{suf.upper()} sin texto extraíble"
-        return base_dict
+def _read_text(path: Path) -> tuple[str, bool]:
+    """
+    Lee el texto del PDF. Retorna (texto, es_escaneado).
+    es_escaneado=True si el PDF no tiene texto extraíble.
+    """
+    suf = path.suffix.lower()
+    if suf in (".docx", ".doc"):
+        from docx import Document
+        doc = Document(str(path))
+        parts = []
+        for para in doc.paragraphs:
+            if para.text.strip():
+                parts.append(para.text)
+        for table in doc.tables:
+            for row in table.rows:
+                parts.append("\t".join(cell.text for cell in row.cells))
+        return "\n".join(parts), False
+
+    with pdfplumber.open(path) as pdf:
+        pages_text = [page.extract_text() or "" for page in pdf.pages]
+    text = "\n".join(pages_text)
+    es_escaneado = not text.strip()
+    return text, es_escaneado
+
+
+def extract_many(path: "str | Path") -> list[dict]:
+    """
+    Extrae TODOS los registros de un certificado de retención.
+    Un certificado puede tener múltiples conceptos (1302, 1303) o
+    múltiples terceros, generando varias filas.
+
+    Retorna lista de dicts con campos:
+        razon_social, nit, dv, tipo_doc, direccion, ciudad_retencion,
+        concepto, base, retencion, porcentaje, validacion_tasa,
+        es_escaneado, tipo_cert, fuente, archivo, error
+    """
+    path = Path(path)
+    base = _base_row(path)
+
+    try:
+        text, es_escaneado = _read_text(path)
+    except Exception as e:
+        base["error"] = f"No se pudo abrir: {e}"
+        return [base]
+
+    if es_escaneado:
+        base["error"] = "PDF escaneado (imagen) — texto no extraíble"
+        base["es_escaneado"] = True
+        return [base]
 
     tipo_cert             = _cert_type(text)
     razon, nit, dv        = _extract_emisor(text)
-    concepto, porcentaje  = _detect_concepto(text, tipo_cert)
-    base, retencion       = _extract_amounts(text, tipo_cert)
     ciudad                = _extract_ciudad_retencion(text)
     direccion             = _extract_direccion(text)
 
-    return {
-        "razon_social":     razon,
-        "nit":              nit,
-        "dv":               dv,
-        "tipo_doc":         _tipo_doc(nit),
-        "direccion":        direccion,
-        "ciudad_retencion": ciudad,
-        "concepto":         concepto,
-        "base":             base,
-        "retencion":        retencion,
-        "porcentaje":       porcentaje,
-        "tipo_cert":        tipo_cert,
-        "fuente":           "PDF",
-        "archivo":          path.name,
-        "error":            "",
-    }
+    def _make_row(concepto: str, porcentaje: float, b: float, r: float) -> dict:
+        tasa_calc = round(r / b * 100, 2) if b else 0.0
+        return {
+            "razon_social":     razon,
+            "nit":              nit,
+            "dv":               dv,
+            "tipo_doc":         _tipo_doc(nit),
+            "direccion":        direccion,
+            "ciudad_retencion": ciudad,
+            "concepto":         concepto,
+            "base":             b,
+            "retencion":        r,
+            "porcentaje":       porcentaje,
+            "validacion_tasa":  tasa_calc,
+            "es_escaneado":     False,
+            "tipo_cert":        tipo_cert,
+            "fuente":           "PDF",
+            "archivo":          path.name,
+            "error":            "",
+        }
+
+    # ICA → fila única (va a tabla separada)
+    if tipo_cert == "ICA":
+        b, r = _extract_amounts(text, tipo_cert)
+        return [_make_row("ICA", 0.0, b, r)]
+
+    # Intentar múltiples filas de concepto
+    multi = _extract_concepto_rows(text, tipo_cert)
+    if multi:
+        return [_make_row(concepto, pct, b, r) for concepto, pct, b, r in multi]
+
+    # Fallback: fila única
+    concepto, porcentaje  = _detect_concepto(text, tipo_cert)
+    b, r                  = _extract_amounts(text, tipo_cert)
+    if b == 0 and r == 0:
+        base["error"] = "No se encontraron montos"
+        base["razon_social"] = razon
+        base["nit"] = nit
+        base["dv"] = dv
+        base["ciudad_retencion"] = ciudad
+        base["tipo_cert"] = tipo_cert
+        return [base]
+    return [_make_row(concepto, porcentaje, b, r)]
+
+
+def extract_one(path: "str | Path") -> dict:
+    """
+    Extrae el primer registro de un certificado de retención PDF.
+    Alias de extract_many()[0] — mantiene compatibilidad hacia atrás.
+
+    Para certificados con múltiples conceptos usar extract_many().
+    """
+    rows = extract_many(path)
+    return rows[0] if rows else _base_row(Path(path), error="Sin resultados")

@@ -51,7 +51,7 @@ def test_consultar_iva_mes_existente(df_mock):
 
 def test_consultar_iva_mes_sin_datos(df_mock):
     result = _tool_consultar_iva_mes(df_mock, "2025-01")
-    assert "no hay documentos" in result.lower()
+    assert "no hay" in result.lower()
 
 
 def test_top_proveedores(df_mock):

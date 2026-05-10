@@ -1,0 +1,9 @@
+{
+  "framework": "nextjs",
+  "rootDirectory": "taxops-web",
+  "buildCommand": "next build",
+  "outputDirectory": ".next",
+  "env": {
+    "NEXT_PUBLIC_API_URL": "@taxops_api_url"
+  }
+}

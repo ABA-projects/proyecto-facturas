@@ -50,3 +50,8 @@ desktop.ini
 *.swp
 *.swo
 .worktrees/
+
+# ── Next.js (taxops-web) ──────────────────────────────────────────────────────
+taxops-web/.next/
+taxops-web/node_modules/
+taxops-web/.env.local

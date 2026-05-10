@@ -1,0 +1,36 @@
+# TaxOps API — dependencias Python
+# Instalación: pip install -r api/requirements-api.txt
+
+# ── Web framework ─────────────────────────────────────────────────────────────
+fastapi>=0.115
+uvicorn[standard]>=0.30
+python-multipart>=0.0.9
+
+# ── Validación y settings ─────────────────────────────────────────────────────
+pydantic>=2.0
+pydantic-settings>=2.0
+
+# ── JWT ───────────────────────────────────────────────────────────────────────
+python-jose[cryptography]>=3.3
+
+# ── Pipeline (heredados del proyecto) ────────────────────────────────────────
+pdfplumber>=0.11.4
+lxml>=5.3.0
+pandas>=2.0.0
+openpyxl>=3.1.5
+
+# ── Base de datos ─────────────────────────────────────────────────────────────
+sqlalchemy>=2.0
+psycopg2-binary>=2.9
+
+# ── Auth ──────────────────────────────────────────────────────────────────────
+bcrypt>=4.0
+python-dotenv>=1.0
+
+# ── AI providers ─────────────────────────────────────────────────────────────
+groq>=0.11
+# openai>=1.0          # descomenta si usas OpenAI
+# anthropic>=0.30      # descomenta si usas Anthropic
+# google-generativeai  # descomenta si usas Google Gemini
+# ── PDF generation ───────────────────────────────────────────────────────
+reportlab>=4.2

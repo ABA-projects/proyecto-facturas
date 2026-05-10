@@ -9,7 +9,7 @@ import pytest
 import pandas as pd
 from pathlib import Path
 
-from extractor import extract_one
+from pipeline.extractor import extract_one
 from main import _resolver_archivos, procesar
 
 # ── Localización de PDFs de prueba ────────────────────────────────────────────

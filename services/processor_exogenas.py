@@ -8,7 +8,7 @@ from typing import Callable
 
 import pandas as pd
 
-from exogenas.extractor import extract_one
+from exogenas.extractor import extract_many
 from exogenas.municipios import buscar_municipio
 
 
@@ -82,11 +82,12 @@ def procesar_exogenas(
         if on_progress:
             on_progress(i, len(paths), Path(p).name)
         try:
-            row = extract_one(p)
-            if row.get("error"):
-                errores += 1
-                advertencias.append(f"⚠️ {Path(p).name}: {row['error']}")
-            filas.append(row)
+            rows = extract_many(p)
+            for row in rows:
+                if row.get("error"):
+                    errores += 1
+                    advertencias.append(f"⚠️ {Path(p).name}: {row['error']}")
+                filas.append(row)
         except Exception as e:
             errores += 1
             advertencias.append(f"❌ {Path(p).name}: {e}")
