@@ -1,0 +1,75 @@
+# TaxOps — Deploy a Railway vía API
+#
+# Se activa SOLO cuando el CI pasa en main.
+# No necesitas configurar Railway Webhooks extra si Railway ya tiene
+# auto-deploy activado en el repo. Este workflow sirve para:
+#   a) Forzar redeploy cuando CI pasa (útil si Railway tiene auto-deploy OFF)
+#   b) Enviar un redeploy explícito con el SHA del commit
+#   c) Notificar por Slack/Discord (opcional, descomenta la sección)
+#
+# Requisito en GitHub Secrets:
+#   RAILWAY_TOKEN   → Settings > Tokens en railway.app
+#   RAILWAY_SERVICE_API_ID  → ID del servicio "taxops-api" en Railway
+#   RAILWAY_SERVICE_WEB_ID  → ID del servicio "taxops-web" en Railway
+#
+# Cómo obtener los IDs:
+#   railway link   (en el directorio del proyecto)
+#   railway status  → muestra proyecto + servicio IDs
+#   También: Settings del servicio en railway.app > Copy Service ID
+
+name: Deploy to Railway
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+jobs:
+  deploy:
+    name: Deploy → Railway
+    runs-on: ubuntu-latest
+    # Solo deployar si el CI pasó exitosamente
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy API service
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          railway up \
+            --service ${{ secrets.RAILWAY_SERVICE_API_ID }} \
+            --detach
+        # --detach: no espera a que termine el deploy (Railway lo gestiona)
+
+      - name: Deploy Web service
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          railway up \
+            --service ${{ secrets.RAILWAY_SERVICE_WEB_ID }} \
+            --detach
+
+      - name: Deploy summary
+        run: |
+          echo "### Deploy disparado" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: ${{ github.event.workflow_run.head_sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Rama**: main" >> $GITHUB_STEP_SUMMARY
+          echo "- **Estado Railway**: Ver https://railway.app" >> $GITHUB_STEP_SUMMARY
+
+      # ── Notificación Slack (opcional) ────────────────────────────────
+      # Descomenta y agrega SLACK_WEBHOOK_URL en GitHub Secrets
+      # - name: Notify Slack
+      #   uses: slackapi/slack-github-action@v1
+      #   with:
+      #     payload: |
+      #       {
+      #         "text": "TaxOps deploying to Railway 🚀\nCommit: ${{ github.event.workflow_run.head_sha }}"
+      #       }
+      #   env:
+      #     SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
