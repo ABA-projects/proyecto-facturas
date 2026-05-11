@@ -135,6 +135,14 @@ async def google_callback(code: str, state: str | None = None) -> dict:
     if not s.GOOGLE_CLIENT_ID:
         raise HTTPException(status_code=501, detail="Google OAuth no configurado")
 
+    # Recover frontend URL from state early (needed for redirects on error/no-account)
+    import base64 as _b64, json as _json
+    try:
+        padded = (state or "") + "==" * (4 - len((state or "")) % 4)
+        frontend_base = _json.loads(_b64.urlsafe_b64decode(padded)).get("f", s.FRONTEND_URL)
+    except Exception:
+        frontend_base = s.FRONTEND_URL
+
     redirect_uri = f"{s.API_BASE_URL}/auth/google/callback"  # debe coincidir con lo enviado a Google
 
     # Exchange code for tokens
@@ -176,21 +184,10 @@ async def google_callback(code: str, state: str | None = None) -> dict:
             ).mappings().fetchone()
 
             if row is None:
-                # Auto-register: create org + owner user
-                slug = _slug_from_name(full_name or email.split("@")[0])
-                org_name = full_name or email.split("@")[0]
-                org = db.execute(
-                    text("INSERT INTO organizations (slug, name, plan) VALUES (:s, :n, 'free') RETURNING id"),
-                    {"s": slug, "n": org_name},
-                ).mappings().fetchone()
-                row = db.execute(
-                    text("""
-                        INSERT INTO users (org_id, email, hashed_password, full_name, role)
-                        VALUES (:o, :e, :h, :f, 'owner')
-                        RETURNING id, org_id, role, email
-                    """),
-                    {"o": org["id"], "e": email, "h": hash_password(secrets.token_hex(16)), "f": full_name},
-                ).mappings().fetchone()
+                # User doesn't exist — redirect to signup instead of auto-creating
+                import urllib.parse
+                signup_url = f"{frontend_base.rstrip('/')}/signup?error=no_account&email={urllib.parse.quote(email)}"
+                return RedirectResponse(signup_url)
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Error de base de datos") from exc
 
@@ -203,12 +200,6 @@ async def google_callback(code: str, state: str | None = None) -> dict:
     refresh = create_refresh_token(sub=str(row["id"]))
 
     # Recover frontend URL from state (avoids relying on env var at callback time)
-    import base64 as _b64, json as _json
-    try:
-        padded = (state or "") + "==" * (4 - len((state or "")) % 4)
-        frontend_base = _json.loads(_b64.urlsafe_b64decode(padded)).get("f", s.FRONTEND_URL)
-    except Exception:
-        frontend_base = s.FRONTEND_URL
     frontend_url = f"{frontend_base.rstrip('/')}/auth/callback?access_token={access}&refresh_token={refresh}"
     return RedirectResponse(frontend_url)
 
@@ -287,3 +278,24 @@ async def me(user: dict = Depends(get_current_user)) -> UserResponse:
 async def logout() -> dict:
     # JWT es stateless; el cliente descarta los tokens
     return {"message": "Sesión cerrada"}
+
+
+@router.post("/request-admin")
+async def request_admin(user: dict = Depends(get_current_user)) -> dict:
+    """Contador solicita ser promovido a admin. Marca timestamp en DB."""
+    from db.database import get_db
+    from sqlalchemy import text
+
+    if user["role"] != "contador":
+        raise HTTPException(status_code=403, detail="Solo los contadores pueden solicitar acceso admin")
+
+    try:
+        with get_db() as db:
+            db.execute(
+                text("UPDATE users SET admin_requested_at = NOW() WHERE id = :id"),
+                {"id": user["user_id"]},
+            )
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Error de base de datos") from exc
+
+    return {"message": "Solicitud enviada. Un administrador revisará tu solicitud."}

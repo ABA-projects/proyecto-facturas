@@ -185,6 +185,47 @@ async def deactivate_user(
     return {"message": "Usuario desactivado"}
 
 
+@router.get("/users/admin-requests")
+async def list_admin_requests(admin: dict = Depends(require_admin)) -> list[dict]:
+    """Lista contadores que han solicitado ser promovidos a admin."""
+    get_db = _get_db()
+    with get_db() as db:
+        rows = db.execute(
+            text("""
+                SELECT id, email, full_name, admin_requested_at, created_at
+                FROM users
+                WHERE org_id = :o AND role = 'contador'
+                  AND admin_requested_at IS NOT NULL
+                  AND active = TRUE
+                ORDER BY admin_requested_at ASC
+            """),
+            {"o": admin["org_id"]},
+        ).mappings().fetchall()
+    return [dict(r) for r in rows]
+
+
+@router.post("/users/{user_id}/approve-admin")
+async def approve_admin(
+    user_id: str,
+    admin: dict = Depends(require_admin),
+) -> dict:
+    """Promueve un contador a admin y limpia la solicitud."""
+    get_db = _get_db()
+    with get_db() as db:
+        result = db.execute(
+            text("""
+                UPDATE users
+                SET role = 'admin', admin_requested_at = NULL
+                WHERE id = :id AND org_id = :o AND role = 'contador'
+                RETURNING id
+            """),
+            {"id": user_id, "o": admin["org_id"]},
+        ).fetchone()
+    if result is None:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado o ya es admin")
+    return {"message": "Usuario promovido a admin"}
+
+
 # ── Clients ──────────────────────────────────────────────────────────────────
 
 @router.get("/clients", response_model=list[ClientResponse])

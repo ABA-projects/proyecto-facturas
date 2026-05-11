@@ -1,21 +1,26 @@
 "use client";
 
-import { useState, FormEvent, Suspense } from "react";
-import { useRouter } from "next/navigation";
+import { useState, FormEvent, Suspense, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 function SignupForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [form, setForm] = useState({
-    email: "",
+    email: searchParams.get("email") ?? "",
     password: "",
     full_name: "",
     org_name: "",
   });
-  const [error, setError] = useState("");
+  const [error, setError] = useState(
+    searchParams.get("error") === "no_account"
+      ? "Tu cuenta de Google no está registrada. Completa el formulario para crear tu cuenta."
+      : ""
+  );
   const [loading, setLoading] = useState(false);
 
   function update(field: string, value: string) {

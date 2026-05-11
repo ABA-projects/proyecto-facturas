@@ -11,6 +11,7 @@ import { useAuth } from "@/lib/auth";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type User         = { id: string; email: string; full_name: string | null; role: string; active: boolean; created_at: string };
+type AdminRequest = { id: string; email: string; full_name: string | null; admin_requested_at: string; created_at: string };
 type Client       = { id: string; nit: string; razon_social: string; active: boolean };
 type Session      = { id: string; total_archivos: number; procesados: number; errores: number; nuevas: number; duplicadas: number; status: string; started_at: string; finished_at: string | null; user_email: string | null };
 type Autorreten   = { id: number; nit: string; razon_social: string | null; vigente: boolean; updated_at: string };
@@ -22,6 +23,7 @@ type Stats        = { total_invoices: number; total_exogenas: number; total_user
 const TABS = [
   { key: "dashboard",         label: "Dashboard",         icon: <LayoutDashboard size={14} /> },
   { key: "usuarios",          label: "Usuarios",          icon: <Users size={14} /> },
+  { key: "solicitudes",       label: "Solicitudes Admin",  icon: <Shield size={14} /> },
   { key: "clientes",          label: "Clientes",          icon: <Building2 size={14} /> },
   { key: "actividad",         label: "Actividad",         icon: <Activity size={14} /> },
   { key: "autorretenedores",  label: "Autorretenedores",  icon: <Shield size={14} /> },
@@ -97,6 +99,14 @@ export default function AdminPage() {
   const [newIng, setNewIng]             = useState({ periodo: "", ingresos_gravados: "", ingresos_excluidos: "" });
   const loadIngresos = useCallback(() => { setIngresosL(true); get<Ingreso[]>("/admin/ingresos").then(setIngresos).finally(() => setIngresosL(false)); }, [get]);
 
+  // ── Solicitudes Admin ─────────────────────────────────────────────────────
+  const [requests, setRequests]       = useState<AdminRequest[]>([]);
+  const [requestsLoading, setReqL]    = useState(false);
+  const loadRequests = useCallback(() => {
+    setReqL(true);
+    get<AdminRequest[]>("/admin/users/admin-requests").then(setRequests).finally(() => setReqL(false));
+  }, [get]);
+
   // ── Organización ───────────────────────────────────────────────────────────
   const [org, setOrg]             = useState<Org | null>(null);
   const [orgLoading, setOrgL]     = useState(false);
@@ -112,6 +122,7 @@ export default function AdminPage() {
   useEffect(() => {
     if (tab === "dashboard")        loadStats();
     if (tab === "usuarios")         loadUsers();
+    if (tab === "solicitudes")      loadRequests();
     if (tab === "clientes")         loadClients();
     if (tab === "actividad")        loadSessions();
     if (tab === "autorretenedores") loadAutos();
@@ -297,6 +308,55 @@ export default function AdminPage() {
                         {u.active && u.id !== user?.user_id && (
                           <button onClick={() => deactivateUser(u.id)} className="text-gray-400 hover:text-red-500 transition-colors" title="Desactivar"><Trash2 size={14} /></button>
                         )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ══ SOLICITUDES ADMIN ══════════════════════════════════════════════════ */}
+      {tab === "solicitudes" && (
+        <div className="space-y-4">
+          <div className="card p-0 overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+              <h3 className="font-semibold text-gray-900">Solicitudes de acceso Admin ({requests.length})</h3>
+              <button onClick={loadRequests} className="text-gray-400 hover:text-gray-700"><RefreshCw size={14} /></button>
+            </div>
+            {requestsLoading ? (
+              <div className="p-6 text-sm text-gray-400">Cargando...</div>
+            ) : requests.length === 0 ? (
+              <div className="p-6 text-sm text-gray-400">No hay solicitudes pendientes.</div>
+            ) : (
+              <table className="w-full text-sm">
+                <thead><tr className="bg-gray-50 border-b border-gray-100">
+                  {["Email", "Nombre", "Solicitado", "Creado", "Acción"].map((h) => (
+                    <th key={h} className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">{h}</th>
+                  ))}
+                </tr></thead>
+                <tbody>
+                  {requests.map((r) => (
+                    <tr key={r.id} className="border-b border-gray-100 hover:bg-gray-50">
+                      <td className="px-6 py-3 text-gray-900">{r.email}</td>
+                      <td className="px-6 py-3 text-gray-500">{r.full_name ?? "—"}</td>
+                      <td className="px-6 py-3 text-gray-400 text-xs">{new Date(r.admin_requested_at).toLocaleString("es-CO")}</td>
+                      <td className="px-6 py-3 text-gray-400 text-xs">{new Date(r.created_at).toLocaleDateString("es-CO")}</td>
+                      <td className="px-6 py-3">
+                        <button
+                          onClick={async () => {
+                            try {
+                              await post(`/admin/users/${r.id}/approve-admin`, {});
+                              flash(`${r.email} promovido a admin`, "ok");
+                              loadRequests();
+                            } catch { flash("Error al aprobar", "err"); }
+                          }}
+                          className="flex items-center gap-1 bg-emerald-500 hover:bg-emerald-600 text-white px-3 py-1 rounded-lg text-xs font-medium transition-colors"
+                        >
+                          <Check size={12} /> Aprobar como Admin
+                        </button>
                       </td>
                     </tr>
                   ))}

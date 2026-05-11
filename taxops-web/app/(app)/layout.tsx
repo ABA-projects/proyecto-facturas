@@ -1,10 +1,51 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Sidebar from "@/components/layout/sidebar";
 import Header from "@/components/layout/header";
 import { AuthProvider, useAuth } from "@/lib/auth";
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
+function AdminRequestBanner() {
+  const { token, user } = useAuth();
+  const [status, setStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
+
+  if (!user || user.role !== "contador") return null;
+
+  async function handleRequest() {
+    setStatus("loading");
+    try {
+      const res = await fetch(`${API_URL}/auth/request-admin`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setStatus(res.ok ? "done" : "error");
+    } catch {
+      setStatus("error");
+    }
+  }
+
+  return (
+    <div className="bg-amber-50 border-b border-amber-200 px-6 py-2 flex items-center justify-between text-sm">
+      <span className="text-amber-800">
+        Tu cuenta tiene rol <strong>contador</strong>. ¿Necesitas acceso de administrador?
+      </span>
+      {status === "idle" && (
+        <button
+          onClick={handleRequest}
+          className="ml-4 bg-amber-500 hover:bg-amber-600 text-white px-3 py-1 rounded-lg font-medium transition-colors"
+        >
+          Solicitar acceso Admin
+        </button>
+      )}
+      {status === "loading" && <span className="ml-4 text-amber-600">Enviando...</span>}
+      {status === "done" && <span className="ml-4 text-green-700 font-medium">✓ Solicitud enviada. Un admin la revisará.</span>}
+      {status === "error" && <span className="ml-4 text-red-600">Error al enviar. Intenta de nuevo.</span>}
+    </div>
+  );
+}
 
 function AppShell({ children }: { children: React.ReactNode }) {
   const { token, loadSession, loading } = useAuth();
@@ -38,6 +79,7 @@ function AppShell({ children }: { children: React.ReactNode }) {
       <Sidebar />
       <div className="flex-1 flex flex-col min-w-0">
         <Header />
+        <AdminRequestBanner />
         <main className="flex-1 p-6 overflow-auto">{children}</main>
       </div>
     </div>

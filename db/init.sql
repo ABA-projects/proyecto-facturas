@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS users (
     full_name       TEXT,
     role            TEXT        NOT NULL DEFAULT 'contador',  -- owner | admin | contador
     active          BOOLEAN     NOT NULL DEFAULT TRUE,
+    admin_requested_at TIMESTAMPTZ,                          -- solicitud de promoción a admin
     last_login_at   TIMESTAMPTZ,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
