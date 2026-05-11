@@ -6,18 +6,11 @@
 builder = "dockerfile"
 dockerfilePath = "Dockerfile"
 
-# NEXT_PUBLIC_API_URL se hornea en el bundle de Next.js en build time.
-# Configúrala como variable en el dashboard de Railway con la URL real de la API.
-# Después de cambiarla, Railway hace rebuild automático.
-#
-# En el dashboard → taxops-web → Variables → Add:
-#   NEXT_PUBLIC_API_URL = https://<tu-api>.railway.app
+[build.args]
+NEXT_PUBLIC_API_URL = "https://proyecto-facturas-production.up.railway.app"
 
 [deploy]
 healthcheckPath = "/"
 healthcheckTimeout = 60
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
-
-[[services]]
-internalPort = 3000
