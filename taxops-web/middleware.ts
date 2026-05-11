@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 // Rutas que no requieren autenticación
-const PUBLIC_PATHS = ["/login", "/api/auth"];
+const PUBLIC_PATHS = ["/login", "/signup", "/api/auth", "/auth/callback"];
 
 // La raíz "/" es pública (landing page)
 const PUBLIC_EXACT = ["/"];

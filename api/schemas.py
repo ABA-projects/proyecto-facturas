@@ -19,6 +19,32 @@ class LoginRequest(BaseModel):
         return v.strip().lower()
 
 
+class RegisterRequest(BaseModel):
+    email: str
+    password: str
+    full_name: Optional[str] = None
+    org_name: str  # Nombre de la firma/empresa
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, v: str) -> str:
+        return v.strip().lower()
+
+    @field_validator("password")
+    @classmethod
+    def password_strength(cls, v: str) -> str:
+        if len(v) < 6:
+            raise ValueError("La contraseña debe tener al menos 6 caracteres")
+        return v
+
+    @field_validator("org_name")
+    @classmethod
+    def org_name_not_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("El nombre de la organización es obligatorio")
+        return v.strip()
+
+
 class TokenResponse(BaseModel):
     access_token: str
     refresh_token: str

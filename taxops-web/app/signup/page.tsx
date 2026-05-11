@@ -1,20 +1,26 @@
 "use client";
 
 import { useState, FormEvent, Suspense } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
-function LoginForm() {
+function SignupForm() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const redirect = searchParams.get("redirect") ?? "/dashboard";
 
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [form, setForm] = useState({
+    email: "",
+    password: "",
+    full_name: "",
+    org_name: "",
+  });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  function update(field: string, value: string) {
+    setForm((p) => ({ ...p, [field]: value }));
+  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -22,24 +28,30 @@ function LoginForm() {
     setLoading(true);
 
     try {
-      const res = await fetch("/api/auth/login", {
+      // 1. Register on backend
+      const res = await fetch(`${API_URL}/auth/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify(form),
       });
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        setError(data.detail ?? "Credenciales incorrectas");
+        setError(data.detail ?? "Error al crear la cuenta");
         return;
       }
 
-      const { access_token } = await res.json();
+      const { access_token, refresh_token } = await res.json();
 
-      // Guardar access token en sessionStorage para las llamadas a la API
+      // 2. Store refresh token as httpOnly cookie via Next.js route
+      await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ _tokens: { access_token, refresh_token } }),
+      });
+
       sessionStorage.setItem("taxops_token", access_token);
-
-      router.push(redirect);
+      router.push("/dashboard");
       router.refresh();
     } catch {
       setError("Error de conexión. Intenta de nuevo.");
@@ -48,30 +60,32 @@ function LoginForm() {
     }
   }
 
+  function handleGoogle() {
+    window.location.href = `${API_URL}/auth/google`;
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-brand-navy to-slate-900 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
         {/* Logo */}
         <div className="text-center mb-8">
-          <div className="text-4xl font-black tracking-tight">
-            <span className="text-brand-orange">Tax</span>
-            <span className="text-white">Ops</span>
-          </div>
-          <p className="text-slate-400 text-sm mt-2">
-            Automatización Contable Colombia
-          </p>
+          <Link href="/" className="inline-block">
+            <div className="text-4xl font-black tracking-tight">
+              <span className="text-brand-orange">Tax</span>
+              <span className="text-white">Ops</span>
+            </div>
+          </Link>
+          <p className="text-slate-400 text-sm mt-2">Automatización Contable Colombia</p>
         </div>
 
-        {/* Card */}
         <div className="bg-white rounded-2xl shadow-2xl p-8">
-          <h1 className="text-xl font-bold text-gray-900 mb-6">
-            Iniciar sesión
-          </h1>
+          <h1 className="text-xl font-bold text-gray-900 mb-2">Crear cuenta gratis</h1>
+          <p className="text-sm text-gray-500 mb-6">Sin tarjeta de crédito · 14 días gratis</p>
 
           {/* Google */}
           <button
             type="button"
-            onClick={() => { window.location.href = `${API_URL}/auth/google`; }}
+            onClick={handleGoogle}
             className="w-full flex items-center justify-center gap-3 border border-gray-300 rounded-xl px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors mb-4"
           >
             <svg width="18" height="18" viewBox="0 0 18 18">
@@ -85,7 +99,7 @@ function LoginForm() {
 
           <div className="relative mb-4">
             <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-200" /></div>
-            <div className="relative flex justify-center text-xs text-gray-400 bg-white px-2 w-fit mx-auto">o con tu correo</div>
+            <div className="relative flex justify-center text-xs text-gray-400 bg-white px-2 w-fit mx-auto">o regístrate con email</div>
           </div>
 
           {error && (
@@ -97,12 +111,39 @@ function LoginForm() {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
+                Nombre de la empresa / firma
+              </label>
+              <input
+                type="text"
+                value={form.org_name}
+                onChange={(e) => update("org_name", e.target.value)}
+                placeholder="ABA Contable S.A.S."
+                required
+                className="input"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Tu nombre
+              </label>
+              <input
+                type="text"
+                value={form.full_name}
+                onChange={(e) => update("full_name", e.target.value)}
+                placeholder="Jaime Henao"
+                className="input"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
                 Correo electrónico
               </label>
               <input
                 type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                value={form.email}
+                onChange={(e) => update("email", e.target.value)}
                 placeholder="contador@firma.com"
                 required
                 autoComplete="email"
@@ -116,11 +157,12 @@ function LoginForm() {
               </label>
               <input
                 type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
+                value={form.password}
+                onChange={(e) => update("password", e.target.value)}
+                placeholder="Mínimo 6 caracteres"
                 required
-                autoComplete="current-password"
+                minLength={6}
+                autoComplete="new-password"
                 className="input"
               />
             </div>
@@ -130,30 +172,30 @@ function LoginForm() {
               disabled={loading}
               className="btn-primary w-full mt-2"
             >
-              {loading ? "Entrando..." : "Entrar"}
+              {loading ? "Creando cuenta..." : "Crear cuenta gratis →"}
             </button>
           </form>
 
-          <p className="text-center text-xs text-gray-400 mt-6">
-            ¿No tienes cuenta?{" "}
-            <Link href="/signup" className="text-brand-orange hover:underline font-medium">
-              Regístrate gratis
+          <p className="text-center text-xs text-gray-400 mt-5">
+            ¿Ya tienes cuenta?{" "}
+            <Link href="/login" className="text-brand-orange hover:underline font-medium">
+              Inicia sesión
             </Link>
           </p>
         </div>
 
         <p className="text-center text-slate-500 text-xs mt-6">
-          Resolución DIAN 000042/2020 · Art. 490 ET
+          Al registrarte aceptas nuestros Términos de Servicio · Política de Privacidad
         </p>
       </div>
     </div>
   );
 }
 
-export default function LoginPage() {
+export default function SignupPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen bg-slate-900" />}>
-      <LoginForm />
+    <Suspense>
+      <SignupForm />
     </Suspense>
   );
 }

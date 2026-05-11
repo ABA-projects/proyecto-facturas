@@ -5,6 +5,20 @@ const API_URL = process.env.INTERNAL_API_URL ?? process.env.NEXT_PUBLIC_API_URL 
 export async function POST(request: NextRequest) {
   const body = await request.json();
 
+  // Support pre-generated tokens from register/OAuth flows
+  if (body._tokens) {
+    const { access_token, refresh_token } = body._tokens as { access_token: string; refresh_token: string };
+    const response = NextResponse.json({ access_token });
+    response.cookies.set("taxops_refresh", refresh_token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 60 * 60 * 24 * 7,
+      path: "/",
+    });
+    return response;
+  }
+
   const res = await fetch(`${API_URL}/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -20,14 +34,14 @@ export async function POST(request: NextRequest) {
 
   const response = NextResponse.json({ access_token: data.access_token });
 
-  // Refresh token en cookie httpOnly — nunca accesible por JS del cliente
   response.cookies.set("taxops_refresh", data.refresh_token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
-    maxAge: 60 * 60 * 24 * 7, // 7 días
+    maxAge: 60 * 60 * 24 * 7,
     path: "/",
   });
 
   return response;
 }
+

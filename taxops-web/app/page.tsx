@@ -194,7 +194,7 @@ export default function LandingPage() {
             <Link href="/login" className="text-sm font-semibold text-gray-700 hover:text-brand-orange transition-colors px-4 py-2">
               Iniciar sesión
             </Link>
-            <Link href="/login" className="bg-brand-orange text-white text-sm font-semibold px-5 py-2 rounded-xl hover:bg-orange-600 transition-colors">
+            <Link href="/signup" className="bg-brand-orange text-white text-sm font-semibold px-5 py-2 rounded-xl hover:bg-orange-600 transition-colors">
               Empezar gratis →
             </Link>
           </div>
@@ -213,7 +213,7 @@ export default function LandingPage() {
                 {n.label}
               </button>
             ))}
-            <Link href="/login" className="block w-full text-center bg-brand-orange text-white text-sm font-semibold px-5 py-2.5 rounded-xl mt-2">
+            <Link href="/signup" className="block w-full text-center bg-brand-orange text-white text-sm font-semibold px-5 py-2.5 rounded-xl mt-2">
               Empezar gratis →
             </Link>
           </div>
@@ -239,7 +239,7 @@ export default function LandingPage() {
           </p>
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Link href="/login"
+            <Link href="/signup"
               className="bg-brand-orange text-white font-bold px-8 py-4 rounded-2xl text-lg hover:bg-orange-600 transition-all hover:scale-105 shadow-lg shadow-orange-500/30">
               Empezar gratis
               <ChevronRight className="inline ml-1" size={20} />
@@ -323,7 +323,7 @@ export default function LandingPage() {
             </div>
           </div>
           <div className="shrink-0">
-            <Link href="/login" className="bg-brand-orange text-white font-bold px-6 py-3 rounded-xl hover:bg-orange-600 transition-colors whitespace-nowrap">
+            <Link href="/signup" className="bg-brand-orange text-white font-bold px-6 py-3 rounded-xl hover:bg-orange-600 transition-colors whitespace-nowrap">
               Probar ahora →
             </Link>
           </div>

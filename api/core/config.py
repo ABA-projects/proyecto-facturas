@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: str = ""
     GOOGLE_API_KEY: str = ""
 
+    # ── Google OAuth ──────────────────────────────────────────────────────────
+    GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_SECRET: str = ""
+    APP_BASE_URL: str = "http://localhost:3000"
+
     # ── Superadmin ────────────────────────────────────────────────────────────
     TAXOPS_SUPERADMIN_EMAILS: str = ""
 
