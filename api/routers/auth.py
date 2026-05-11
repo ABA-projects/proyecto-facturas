@@ -103,7 +103,11 @@ async def google_login(request: Request) -> RedirectResponse:
     if not s.GOOGLE_CLIENT_ID:
         raise HTTPException(status_code=501, detail="Google OAuth no configurado")
 
-    state = secrets.token_urlsafe(16)
+    import base64 as _b64, json as _json
+    # Embed frontend URL in state so callback doesn't depend on env vars
+    state_payload = _b64.urlsafe_b64encode(
+        _json.dumps({"n": secrets.token_urlsafe(8), "f": s.FRONTEND_URL}).encode()
+    ).decode().rstrip("=")
     redirect_uri = f"{s.API_BASE_URL}/auth/google/callback"  # Google llama al backend
     url = (
         "https://accounts.google.com/o/oauth2/v2/auth"
@@ -111,7 +115,7 @@ async def google_login(request: Request) -> RedirectResponse:
         f"&redirect_uri={redirect_uri}"
         "&response_type=code"
         "&scope=openid%20email%20profile"
-        f"&state={state}"
+        f"&state={state_payload}"
         "&access_type=offline"
         "&prompt=select_account"
     )
@@ -198,8 +202,14 @@ async def google_callback(code: str, state: str | None = None) -> dict:
     )
     refresh = create_refresh_token(sub=str(row["id"]))
 
-    # Redirect to frontend with tokens in query params (frontend reads & stores them)
-    frontend_url = f"{s.FRONTEND_URL}/auth/callback?access_token={access}&refresh_token={refresh}"
+    # Recover frontend URL from state (avoids relying on env var at callback time)
+    import base64 as _b64, json as _json
+    try:
+        padded = (state or "") + "==" * (4 - len((state or "")) % 4)
+        frontend_base = _json.loads(_b64.urlsafe_b64decode(padded)).get("f", s.FRONTEND_URL)
+    except Exception:
+        frontend_base = s.FRONTEND_URL
+    frontend_url = f"{frontend_base.rstrip('/')}/auth/callback?access_token={access}&refresh_token={refresh}"
     return RedirectResponse(frontend_url)
 
 
