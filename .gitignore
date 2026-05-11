@@ -23,7 +23,7 @@ env/
 *.env
 
 # ── Facturas y datos fiscales (documentos privados) ───────────────────────────
-facturas/
+/facturas/
 *.pdf
 *.xml
 *.docx
