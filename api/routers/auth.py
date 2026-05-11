@@ -22,6 +22,25 @@ def _slug_from_name(name: str) -> str:
     return slug[:40] + "-" + secrets.token_hex(3)
 
 
+@router.post("/login", response_model=TokenResponse)
+async def login(body: LoginRequest) -> TokenResponse:
+    """Authenticate user and return JWT tokens."""
+    from db.auth import authenticate
+
+    user = authenticate(body.email, body.password)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Credenciales incorrectas")
+
+    access = create_access_token(
+        sub=str(user["id"]),
+        org_id=str(user["org_id"]),
+        role=user["role"],
+        email=user["email"],
+    )
+    refresh = create_refresh_token(sub=str(user["id"]))
+    return TokenResponse(access_token=access, refresh_token=refresh)
+
+
 @router.post("/register", response_model=TokenResponse, status_code=201)
 async def register(body: RegisterRequest) -> TokenResponse:
     """Self-service registration — creates org + owner user."""
