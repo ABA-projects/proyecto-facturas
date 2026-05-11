@@ -6,8 +6,10 @@
 builder = "dockerfile"
 dockerfilePath = "Dockerfile"
 
-[build.args]
-NEXT_PUBLIC_API_URL = "https://proyecto-facturas-production.up.railway.app"
+# IMPORTANTE: Configurar en Railway Dashboard → taxops-web service → Variables:
+#   INTERNAL_API_URL = <URL privada del servicio taxops-api en Railway>
+#   Ejemplo: http://taxops-api.railway.internal:8000
+#   (O la URL pública si no hay red privada configurada)
 
 [deploy]
 healthcheckPath = "/"

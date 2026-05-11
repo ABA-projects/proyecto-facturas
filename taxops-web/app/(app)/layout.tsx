@@ -6,7 +6,7 @@ import Sidebar from "@/components/layout/sidebar";
 import Header from "@/components/layout/header";
 import { AuthProvider, useAuth } from "@/lib/auth";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const API_URL = "/api-proxy";
 
 function AdminRequestBanner() {
   const { token, user } = useAuth();

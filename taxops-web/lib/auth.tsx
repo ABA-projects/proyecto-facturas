@@ -16,7 +16,7 @@ import {
   ReactNode,
 } from "react";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const API_URL = "/api-proxy";
 
 export type AuthUser = {
   user_id: string;
