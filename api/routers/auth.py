@@ -199,7 +199,7 @@ async def google_callback(code: str, state: str | None = None) -> dict:
     refresh = create_refresh_token(sub=str(row["id"]))
 
     # Redirect to frontend with tokens in query params (frontend reads & stores them)
-    frontend_url = f"{s.APP_BASE_URL}/auth/callback?access_token={access}&refresh_token={refresh}"
+    frontend_url = f"{s.FRONTEND_URL}/auth/callback?access_token={access}&refresh_token={refresh}"
     return RedirectResponse(frontend_url)
 
 

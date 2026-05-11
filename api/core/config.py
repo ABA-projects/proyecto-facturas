@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_ID: str = ""
     GOOGLE_CLIENT_SECRET: str = ""
     API_BASE_URL: str = "http://localhost:8000"   # URL pública de la API (para redirect_uri de Google)
-    APP_BASE_URL: str = "http://localhost:3000"   # URL del frontend (para redirect final post-login)
+    FRONTEND_URL: str = "http://localhost:3000"  # URL pública del frontend (para redirect final post-login)
 
     # ── Superadmin ────────────────────────────────────────────────────────────
     TAXOPS_SUPERADMIN_EMAILS: str = ""
