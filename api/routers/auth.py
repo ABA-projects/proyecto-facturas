@@ -31,13 +31,14 @@ async def login(body: LoginRequest) -> TokenResponse:
     if user is None:
         raise HTTPException(status_code=401, detail="Credenciales incorrectas")
 
+    # _build_session returns "user_id" not "id"
     access = create_access_token(
-        sub=str(user["id"]),
+        sub=str(user["user_id"]),
         org_id=str(user["org_id"]),
         role=user["role"],
         email=user["email"],
     )
-    refresh = create_refresh_token(sub=str(user["id"]))
+    refresh = create_refresh_token(sub=str(user["user_id"]))
     return TokenResponse(access_token=access, refresh_token=refresh)
 
 
