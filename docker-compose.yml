@@ -73,6 +73,8 @@ services:
     build:
       context: ./taxops-web
       dockerfile: Dockerfile
+      args:
+        INTERNAL_API_URL: http://api:8000
     container_name: taxops_web
     restart: unless-stopped
     ports:
