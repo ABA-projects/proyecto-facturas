@@ -33,8 +33,8 @@ class RegisterRequest(BaseModel):
     @field_validator("password")
     @classmethod
     def password_strength(cls, v: str) -> str:
-        if len(v) < 6:
-            raise ValueError("La contraseña debe tener al menos 6 caracteres")
+        if len(v) < 8:
+            raise ValueError("La contraseña debe tener al menos 8 caracteres")
         return v
 
     @field_validator("org_name")

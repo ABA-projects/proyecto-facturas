@@ -441,6 +441,10 @@ proyecto-facturas/
 │   ├── core/
 │   │   ├── config.py             # Settings (pydantic-settings)
 │   │   └── security.py           # JWT, bcrypt
+│   ├── alembic/                  # Migraciones de BD
+│   │   ├── env.py                # Lee DATABASE_URL de settings
+│   │   └── versions/001_initial_schema.py
+│   ├── alembic.ini               # Config Alembic (cd api/ && alembic upgrade head)
 │   └── routers/
 │       ├── auth.py
 │       ├── nomina.py             # 7 endpoints nómina
@@ -493,6 +497,10 @@ proyecto-facturas/
 │   ├── DESPLIEGUE.md
 │   ├── TaxOps-Design-Brief.md
 │   └── TaxOps-Logo-Horizontal.svg
+│
+├── Home.py, pages/               # ⚠️ LEGACY — app Streamlit original (no usar en prod)
+│                                 #   El stack productivo es FastAPI + Next.js (api/ + taxops-web/)
+│
 └── tests/
     ├── test_extractor.py         # 44 tests
     ├── test_validator.py         # 19 tests

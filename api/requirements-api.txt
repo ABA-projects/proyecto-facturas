@@ -12,6 +12,7 @@ pydantic-settings>=2.0
 
 # ── JWT ───────────────────────────────────────────────────────────────────────
 python-jose[cryptography]>=3.3
+google-auth>=2.0
 
 # ── Pipeline (heredados del proyecto) ────────────────────────────────────────
 pdfplumber>=0.11.4
@@ -35,3 +36,4 @@ groq>=0.11
 # ── PDF generation ───────────────────────────────────────────────────────
 reportlab>=4.2
 httpx>=0.27
+alembic>=1.13

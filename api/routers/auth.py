@@ -162,12 +162,15 @@ async def google_callback(code: str, state: str | None = None) -> dict:
 
     id_token_str = token_res.json().get("id_token", "")
 
-    # Decode the ID token (without verification for simplicity — Google validates code exchange)
-    import base64, json as _json
+    # Verify ID token signature using Google's public keys
     try:
-        payload_b64 = id_token_str.split(".")[1]
-        payload_b64 += "=" * (4 - len(payload_b64) % 4)
-        google_user = _json.loads(base64.urlsafe_b64decode(payload_b64))
+        from google.oauth2 import id_token as google_id_token
+        from google.auth.transport import requests as google_requests
+        google_user = google_id_token.verify_oauth2_token(
+            id_token_str,
+            google_requests.Request(),
+            s.GOOGLE_CLIENT_ID,
+        )
     except Exception:
         raise HTTPException(status_code=400, detail="Token de Google inválido")
 
