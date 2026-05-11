@@ -46,20 +46,21 @@ def get_db() -> Generator:
 
 
 def db_available() -> bool:
-    """True if PostgreSQL is reachable. Result is cached for the process lifetime."""
+    """True if PostgreSQL is reachable. Caches True permanently; retries on False."""
     global _db_status
     if _DATABASE_URL is None:
         return False
-    if _db_status is not None:
-        return _db_status
+    if _db_status is True:
+        return True
+    # Never cache False — always retry so a transient startup failure doesn't block forever
     try:
         from sqlalchemy import text
         with get_db() as db:
             db.execute(text("SELECT 1"))
         _db_status = True
+        return True
     except Exception:
-        _db_status = False
-    return _db_status
+        return False
 
 
 def get_existing_cufes(org_id: str) -> set[str]:
