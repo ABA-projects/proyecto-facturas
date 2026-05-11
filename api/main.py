@@ -58,3 +58,41 @@ async def health() -> dict:
         "version": "2.0.0",
         "db": "connected" if db_available() else "unavailable",
     }
+
+
+@app.post("/setup/bootstrap", tags=["Setup"], include_in_schema=False)
+async def bootstrap(secret: str, org_slug: str, org_name: str,
+                    email: str, password: str, full_name: str = "") -> dict:
+    """Endpoint de setup inicial — protegido por BOOTSTRAP_SECRET en env vars."""
+    import os
+    expected = os.environ.get("BOOTSTRAP_SECRET", "")
+    if not expected or secret != expected:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    from db.database import get_db
+    from db.auth import hash_password
+    from sqlalchemy import text
+
+    hashed = hash_password(password)
+    with get_db() as db:
+        org = db.execute(text("""
+            INSERT INTO organizations (slug, name, plan)
+            VALUES (:slug, :name, 'pro')
+            ON CONFLICT (slug) DO UPDATE SET name = EXCLUDED.name
+            RETURNING id, slug, name
+        """), {"slug": org_slug, "name": org_name}).mappings().fetchone()
+
+        user = db.execute(text("""
+            INSERT INTO users (org_id, email, hashed_password, full_name, role)
+            VALUES (:org_id, :email, :hp, :fn, 'owner')
+            ON CONFLICT (email) DO UPDATE
+                SET hashed_password = EXCLUDED.hashed_password,
+                    full_name = EXCLUDED.full_name,
+                    role = 'owner', active = TRUE
+            RETURNING id, email, role
+        """), {"org_id": org["id"], "email": email.strip().lower(),
+               "hp": hashed, "fn": full_name}).mappings().fetchone()
+
+    return {"org": {"id": str(org["id"]), "slug": org["slug"], "name": org["name"]},
+            "user": {"id": str(user["id"]), "email": user["email"], "role": user["role"]}}
