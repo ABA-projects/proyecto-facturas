@@ -162,16 +162,16 @@ async def google_callback(code: str, state: str | None = None) -> dict:
 
     id_token_str = token_res.json().get("id_token", "")
 
-    # Verify ID token signature using Google's public keys
-    try:
-        from google.oauth2 import id_token as google_id_token
-        from google.auth.transport import requests as google_requests
-        google_user = google_id_token.verify_oauth2_token(
-            id_token_str,
-            google_requests.Request(),
-            s.GOOGLE_CLIENT_ID,
+    # Verify ID token via Google's tokeninfo endpoint (server-side, full signature check)
+    async with httpx.AsyncClient() as client:
+        info_res = await client.get(
+            "https://oauth2.googleapis.com/tokeninfo",
+            params={"id_token": id_token_str},
         )
-    except Exception:
+    if not info_res.is_success:
+        raise HTTPException(status_code=400, detail="Token de Google inválido")
+    google_user = info_res.json()
+    if google_user.get("aud") != s.GOOGLE_CLIENT_ID:
         raise HTTPException(status_code=400, detail="Token de Google inválido")
 
     email = google_user.get("email", "").lower()
