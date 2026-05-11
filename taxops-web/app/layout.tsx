@@ -1,8 +1,5 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
 import "./globals.css";
-
-const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: "TaxOps · Automatización Contable Colombia",
@@ -39,7 +36,7 @@ export default function RootLayout({
         <meta name="theme-color" content="#1A3A5C" />
         <link rel="apple-touch-icon" href="/icons/icon-192.png" />
       </head>
-      <body className={`${inter.className} bg-gray-50 text-gray-900 dark:bg-slate-900 dark:text-gray-100`}>
+      <body className="font-sans bg-gray-50 text-gray-900 dark:bg-slate-900 dark:text-gray-100">
         {children}
       </body>
     </html>
