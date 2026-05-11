@@ -84,7 +84,7 @@ async def google_login(request: Request) -> RedirectResponse:
         raise HTTPException(status_code=501, detail="Google OAuth no configurado")
 
     state = secrets.token_urlsafe(16)
-    redirect_uri = f"{s.APP_BASE_URL}/api/auth/google/callback"
+    redirect_uri = f"{s.API_BASE_URL}/auth/google/callback"  # Google llama al backend
     url = (
         "https://accounts.google.com/o/oauth2/v2/auth"
         f"?client_id={s.GOOGLE_CLIENT_ID}"
@@ -111,7 +111,7 @@ async def google_callback(code: str, state: str | None = None) -> dict:
     if not s.GOOGLE_CLIENT_ID:
         raise HTTPException(status_code=501, detail="Google OAuth no configurado")
 
-    redirect_uri = f"{s.APP_BASE_URL}/api/auth/google/callback"
+    redirect_uri = f"{s.API_BASE_URL}/auth/google/callback"  # debe coincidir con lo enviado a Google
 
     # Exchange code for tokens
     async with httpx.AsyncClient() as client:
