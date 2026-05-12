@@ -132,7 +132,10 @@ export default function AdminPage() {
   const [userSearch, setUserSearch] = useState("");
   const loadUsers = useCallback(() => {
     setUsersL(true);
-    get<User[]>("/admin/users").then(setUsers).finally(() => setUsersL(false));
+    get<User[]>("/admin/users")
+      .then(setUsers)
+      .catch(() => flash("Error al cargar usuarios", "err"))
+      .finally(() => setUsersL(false));
   }, [get]);
 
   // ── Grupos ─────────────────────────────────────────────────────────────────

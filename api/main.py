@@ -17,6 +17,8 @@ _ROOT = Path(__file__).parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -25,12 +27,39 @@ from routers import admin, auth, chatbot, exogenas, invoices, nomina
 
 settings = get_settings()
 
+
+def _run_migrations() -> None:
+    """Corre `alembic upgrade head` en startup para aplicar migraciones pendientes."""
+    import os
+    from alembic import command
+    from alembic.config import Config
+
+    ini = Path(__file__).parent / "alembic.ini"
+    if not ini.exists():
+        return
+    cfg = Config(str(ini))
+    cfg.set_main_option("sqlalchemy.url", os.environ.get("DATABASE_URL", ""))
+    try:
+        command.upgrade(cfg, "head")
+    except Exception as exc:
+        # No bloquear el arranque si Alembic falla (ej. DB aún no disponible)
+        import logging
+        logging.getLogger("taxops").warning("Alembic upgrade failed: %s", exc)
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    _run_migrations()
+    yield
+
+
 app = FastAPI(
     title="TaxOps API",
     version="2.0.0",
     description="API REST para automatización contable colombiana · Facturas DIAN · Exógenas · IA",
     docs_url="/docs",
     redoc_url="/redoc",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
