@@ -41,7 +41,7 @@ python -m pytest --cov=. --cov-report=term-missing
 TaxOps procesa facturas electrónicas DIAN (PDF/XML) colombianas en un pipeline:
 `facturas/` → `facturas/extractor.py` → `validator.py` → `prorateo.py` → `excel_writer.py` / PostgreSQL
 
-**Stack:** Streamlit multi-página · PostgreSQL 16 · SQLAlchemy · Groq/OpenAI/Anthropic/Google · Docker
+**Stack:** FastAPI 0.115 · Next.js 15.3 (React 19) · PostgreSQL 16 · SQLAlchemy · Groq/OpenAI/Anthropic/Google · Docker · Railway
 
 ### Module responsibilities
 
@@ -67,7 +67,7 @@ TaxOps procesa facturas electrónicas DIAN (PDF/XML) colombianas en un pipeline:
 
 - **`db/database.py`** — Capa SQLAlchemy UI-agnóstica. `db_available()` para degraded mode. `get_existing_cufes(org_id)` para deduplicación incremental. `insert_invoices_batch()` con `ON CONFLICT DO NOTHING`. `get_autorretenedores_nits()` desde DB con fallback a `autorretenedores.txt`.
 
-- **`db/init.sql`** — Schema PostgreSQL multi-tenant: `organizations`, `users`, `clients`, `invoices`, `processing_sessions`, `autorretenedores`, `ingresos_prorateo`. UUID como PK, índices GIN trigram en campos de búsqueda.
+- **`db/init.sql`** — Schema PostgreSQL multi-tenant: `organizations`, `users` (con `deleted_at` soft-hard delete), `clients`, `invoices`, `processing_sessions`, `autorretenedores`, `ingresos_prorateo`, `groups`, `user_groups`, `audit_logs`. UUID como PK, índices GIN trigram en campos de búsqueda.
 
 - **`facturas/autorretenedores.txt`** — 3.287 NITs DIAN (corte 25/02/2026). Cargado al inicio de `facturas/extractor.py`. Para actualizar: reemplazar por nuevo archivo NIT-por-línea. En producción se carga desde tabla `autorretenedores` de PostgreSQL.
 
@@ -110,13 +110,32 @@ Distinción en runtime: `tiene_vendedor = bool(re.search(r'datos\s+del\s+vendedo
 
 ```
 organizations (UUID, plan: free/starter/pro)
-    └── users (role: owner/admin/contador)
+    └── users (role: owner/admin/contador · deleted_at para soft-hard delete)
     └── clients (empresas que gestiona cada contador)
     └── invoices (CUFE único por org — deduplicación automática)
     └── processing_sessions (historial de cargas con métricas)
     └── ingresos_prorateo (persiste ingresos por período)
+    └── groups (módulos TEXT[] por grupo)
+        └── user_groups (many-to-many users↔groups)
+    └── audit_logs (trazabilidad completa: action, module, resource, details JSONB)
 autorretenedores (reemplaza autorretenedores.txt en producción)
 ```
+
+### FastAPI — rutas clave
+
+| Método | Path | Guard | Descripción |
+|--------|------|-------|-------------|
+| POST | `/auth/login` | — | JWT access + refresh |
+| POST | `/auth/register` | — | Crea org + owner |
+| GET | `/admin/stats` | require_admin | Dashboard KPIs + charts |
+| GET | `/admin/users` | require_admin | Lista usuarios (excluye deleted_at) |
+| POST | `/admin/users` | require_admin | Crea usuario en la org |
+| DELETE | `/admin/users/{id}/permanent` | require_owner | Anonymize + soft-hard delete |
+| POST | `/admin/users/{id}/reactivate` | require_admin | Reactiva usuario inactivo |
+| GET/POST | `/admin/groups` | require_admin/owner | CRUD de grupos |
+| GET | `/admin/audit-logs` | require_admin | Logs con filtros module/action/email |
+
+Guards: `get_current_user` → `require_admin` (owner+admin) → `require_owner` (solo owner) → `require_superadmin` (emails en TAXOPS_SUPERADMIN_EMAILS)
 
 ### Key regex patterns
 
@@ -143,10 +162,15 @@ tests/
 └── test_e2e.py         # 32 end-to-end (se saltan si no hay PDFs)
 ```
 
-### SaaS gaps (próximos pasos)
+### CI/CD
 
-- **Auth**: cero autenticación — bloqueante para producción
-- **Multi-tenant enforcement**: schema listo, app no aplica `org_id`
-- **Alembic**: no hay sistema de migraciones
+- **`.github/workflows/ci.yml`** — flake8 + mypy (api-lint), pytest pipeline tests (api-test), ESLint + tsc (web-lint), next build (web-build). Corre en push/PR a main.
+- **`.github/workflows/deploy.yml`** — Se activa cuando CI pasa. Llama Railway GraphQL API para redeploy. **Si Railway tiene auto-deploy ON en el repo, desactivarlo para evitar doble deploy.** Secretos requeridos: `RAILWAY_API_TOKEN`, `RAILWAY_SERVICE_API_ID`, `RAILWAY_SERVICE_WEB_ID`.
+- **`taxops-web/next.config.ts`** — `INTERNAL_API_URL` se bake en build time. Tiene `.trim()` defensivo. Fallback: `NEXT_PUBLIC_API_URL` → `http://localhost:8000`.
+- **Alembic**: `api/alembic/versions/001_baseline.py` (marker), `002_audit_groups.py` (deleted_at + groups + audit_logs).
+
+### Próximos pasos
+
 - **Rate limiting**: sin throttling por organización
-- **FastAPI**: `services/processor.py` ya es UI-agnóstico, listo para `POST /v1/procesar`
+- **Invitaciones por email**: hoy solo el owner puede crear usuarios directamente
+- **Permisos por grupo**: grupos tienen `modules[]` pero el frontend no bloquea rutas por grupo todavía
