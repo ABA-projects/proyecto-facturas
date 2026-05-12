@@ -880,3 +880,87 @@ async def update_org(body: dict, admin: dict = Depends(require_admin)) -> dict:
         _log(db, org_id=admin["org_id"], user=admin, action="update_org",
              resource_type="org", details=updates)
     return {"message": "Organización actualizada"}
+
+
+# ── Invitations ───────────────────────────────────────────────────────────────
+
+from schemas import InviteCreate, InviteResponse  # noqa: E402 (inline to avoid circular at module top)
+
+
+@router.post("/invitations", response_model=InviteResponse, status_code=201)
+async def create_invitation(body: InviteCreate, admin: dict = Depends(require_admin)) -> InviteResponse:
+    import secrets
+    from datetime import datetime, timedelta, timezone
+    from core.config import get_settings
+
+    get_db = _get_db()
+    s = get_settings()
+    token = secrets.token_urlsafe(32)
+    expires_at = datetime.now(timezone.utc) + timedelta(days=7)
+
+    with get_db() as db:
+        # Revoke any existing unused invite for same email in org
+        db.execute(
+            text("DELETE FROM invitations WHERE org_id=:o AND email=:e AND used_at IS NULL"),
+            {"o": admin["org_id"], "e": body.email},
+        )
+        row = db.execute(
+            text("""
+                INSERT INTO invitations (org_id, created_by, email, role, token, expires_at)
+                VALUES (:org, :by, :email, :role, :token, :exp)
+                RETURNING id, created_at
+            """),
+            {"org": admin["org_id"], "by": admin["user_id"], "email": body.email,
+             "role": body.role, "token": token, "exp": expires_at},
+        ).mappings().fetchone()
+        _log(db, org_id=admin["org_id"], user=admin, action="invite_user",
+             resource_type="invitation", details={"email": body.email, "role": body.role})
+
+    invite_url = f"{s.FRONTEND_URL.rstrip('/')}/invite/{token}"
+    return InviteResponse(
+        id=str(row["id"]),
+        email=body.email,
+        role=body.role,
+        invite_url=invite_url,
+        expires_at=expires_at,
+        created_at=row["created_at"],
+    )
+
+
+@router.get("/invitations", response_model=list[InviteResponse])
+async def list_invitations(admin: dict = Depends(require_admin)) -> list[InviteResponse]:
+    from core.config import get_settings
+    get_db = _get_db()
+    s = get_settings()
+    with get_db() as db:
+        rows = db.execute(
+            text("""
+                SELECT id, email, role, token, expires_at, used_at, created_at
+                FROM invitations
+                WHERE org_id = :o AND used_at IS NULL AND expires_at > NOW()
+                ORDER BY created_at DESC
+            """),
+            {"o": admin["org_id"]},
+        ).mappings().fetchall()
+    return [
+        InviteResponse(
+            id=str(r["id"]),
+            email=r["email"],
+            role=r["role"],
+            invite_url=f"{s.FRONTEND_URL.rstrip('/')}/invite/{r['token']}",
+            expires_at=r["expires_at"],
+            used_at=r["used_at"],
+            created_at=r["created_at"],
+        )
+        for r in rows
+    ]
+
+
+@router.delete("/invitations/{invite_id}", status_code=204)
+async def revoke_invitation(invite_id: str, admin: dict = Depends(require_admin)) -> None:
+    get_db = _get_db()
+    with get_db() as db:
+        db.execute(
+            text("DELETE FROM invitations WHERE id=:id AND org_id=:o"),
+            {"id": invite_id, "o": admin["org_id"]},
+        )

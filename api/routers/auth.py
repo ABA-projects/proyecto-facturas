@@ -283,6 +283,79 @@ async def logout() -> dict:
     return {"message": "Sesión cerrada"}
 
 
+@router.get("/invite/{token}")
+async def get_invite_info(token: str) -> dict:
+    """Retorna info de la invitación (sin autenticación) para mostrar en la página de registro."""
+    from db.database import get_db
+    from sqlalchemy import text
+
+    with get_db() as db:
+        row = db.execute(
+            text("""
+                SELECT i.email, i.role, o.name AS org_name
+                FROM invitations i
+                JOIN organizations o ON o.id = i.org_id
+                WHERE i.token = :t AND i.used_at IS NULL AND i.expires_at > NOW()
+            """),
+            {"t": token},
+        ).mappings().fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Invitación inválida o expirada")
+    return {"email": row["email"], "role": row["role"], "org_name": row["org_name"]}
+
+
+@router.post("/invite/{token}/accept", response_model=TokenResponse, status_code=201)
+async def accept_invite(token: str, body: "AcceptInviteRequest") -> TokenResponse:
+    """Crea el usuario a partir de una invitación y retorna tokens de acceso."""
+    from db.database import get_db
+    from db.auth import hash_password
+    from sqlalchemy import text
+    from schemas import AcceptInviteRequest  # noqa: F401
+
+    with get_db() as db:
+        invite = db.execute(
+            text("""
+                SELECT id, org_id, email, role
+                FROM invitations
+                WHERE token = :t AND used_at IS NULL AND expires_at > NOW()
+            """),
+            {"t": token},
+        ).mappings().fetchone()
+        if not invite:
+            raise HTTPException(status_code=404, detail="Invitación inválida o expirada")
+
+        exists = db.execute(
+            text("SELECT id FROM users WHERE email = :e"), {"e": invite["email"]}
+        ).fetchone()
+        if exists:
+            raise HTTPException(status_code=409, detail="El correo ya tiene una cuenta")
+
+        hashed = hash_password(body.password)
+        user = db.execute(
+            text("""
+                INSERT INTO users (org_id, email, hashed_password, full_name, role)
+                VALUES (:o, :e, :h, :f, :r)
+                RETURNING id, org_id, role, email
+            """),
+            {"o": invite["org_id"], "e": invite["email"], "h": hashed,
+             "f": body.full_name or "", "r": invite["role"]},
+        ).mappings().fetchone()
+
+        db.execute(
+            text("UPDATE invitations SET used_at = NOW() WHERE id = :id"),
+            {"id": invite["id"]},
+        )
+
+    access = create_access_token(
+        sub=str(user["id"]),
+        org_id=str(user["org_id"]),
+        role=user["role"],
+        email=user["email"],
+    )
+    refresh = create_refresh_token(sub=str(user["id"]))
+    return TokenResponse(access_token=access, refresh_token=refresh)
+
+
 @router.post("/request-admin")
 async def request_admin(user: dict = Depends(get_current_user)) -> dict:
     """Contador solicita ser promovido a admin. Marca timestamp en DB."""

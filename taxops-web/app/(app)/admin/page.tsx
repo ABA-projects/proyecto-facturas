@@ -27,6 +27,7 @@ type Stats        = {
   error_rate: number; total_nomina: number;
 };
 type Group        = { id: string; name: string; description: string | null; modules: string[]; created_at: string; members_count: number };
+type Invite       = { id: string; email: string; role: string; invite_url: string; expires_at: string; created_at: string };
 type AuditLog     = { id: string; user_email: string | null; action: string; module: string; resource_type: string | null; resource_id: string | null; details: Record<string,unknown> | null; created_at: string };
 
 const ALL_MODULES = ["facturas", "nomina", "exogenas", "calendario", "chatbot", "admin"] as const;
@@ -139,14 +140,30 @@ export default function AdminPage() {
   }, [get]);
 
   // ── Grupos ─────────────────────────────────────────────────────────────────
-  const [groups, setGroups]           = useState<Group[]>([]);
-  const [groupsLoading, setGroupsL]   = useState(false);
-  const [newGroup, setNewGroup]       = useState({ name: "", description: "", modules: [] as string[] });
-  const [editGroup, setEditGroup]     = useState<Group | null>(null);
+  const [groups, setGroups]             = useState<Group[]>([]);
+  const [groupsLoading, setGroupsL]     = useState(false);
+  const [newGroup, setNewGroup]         = useState({ name: "", description: "", modules: [] as string[] });
+  const [editGroup, setEditGroup]       = useState<Group | null>(null);
   const [groupMembers, setGroupMembers] = useState<{ [gid: string]: User[] }>({});
   const loadGroups = useCallback(() => {
     setGroupsL(true);
-    get<Group[]>("/admin/groups").then(setGroups).finally(() => setGroupsL(false));
+    get<Group[]>("/admin/groups")
+      .then((gs) => {
+        setGroups(gs);
+        // Auto-load members for all groups
+        gs.forEach((g) => get<User[]>(`/admin/groups/${g.id}/members`)
+          .then((m) => setGroupMembers((p) => ({ ...p, [g.id]: m }))).catch(() => {}));
+      })
+      .finally(() => setGroupsL(false));
+  }, [get]);
+
+  // ── Invitaciones ───────────────────────────────────────────────────────────
+  const [invites, setInvites]           = useState<Invite[]>([]);
+  const [inviteForm, setInviteForm]     = useState({ email: "", role: "contador" });
+  const [inviteLink, setInviteLink]     = useState("");
+  const [inviteLoading, setInviteL]     = useState(false);
+  const loadInvites = useCallback(() => {
+    get<Invite[]>("/admin/invitations").then(setInvites).catch(() => setInvites([]));
   }, [get]);
 
   // ── Clientes ───────────────────────────────────────────────────────────────
@@ -204,7 +221,7 @@ export default function AdminPage() {
 
   useEffect(() => {
     if (tab === "dashboard")        loadStats();
-    if (tab === "usuarios")         loadUsers();
+    if (tab === "usuarios")         { loadUsers(); loadInvites(); }
     if (tab === "grupos")           { loadGroups(); loadUsers(); }
     if (tab === "solicitudes")      loadRequests();
     if (tab === "clientes")         loadClients();
@@ -213,6 +230,28 @@ export default function AdminPage() {
     if (tab === "ingresos")         loadIngresos();
     if (tab === "organizacion")     loadOrg();
   }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Invite actions ────────────────────────────────────────────────────────
+  async function sendInvite() {
+    if (!inviteForm.email) { flash("Email requerido", "err"); return; }
+    setInviteL(true);
+    try {
+      const inv = await post<Invite>("/admin/invitations", inviteForm);
+      setInviteLink(inv.invite_url);
+      setInvites((p) => [inv, ...p]);
+      setInviteForm({ email: "", role: "contador" });
+      flash("Invitación generada", "ok");
+    } catch (e: unknown) { flash(e instanceof Error ? e.message : "Error al generar invitación", "err"); }
+    finally { setInviteL(false); }
+  }
+
+  async function revokeInvite(id: string) {
+    try {
+      await del(`/admin/invitations/${id}`);
+      setInvites((p) => p.filter((i) => i.id !== id));
+      flash("Invitación revocada", "ok");
+    } catch { flash("Error al revocar", "err"); }
+  }
 
   // ── User actions ───────────────────────────────────────────────────────────
   async function createUser() {
@@ -535,6 +574,68 @@ export default function AdminPage() {
               </table>
             )}
           </div>
+
+          {/* Invitar por enlace */}
+          <div className="card">
+            <h3 className="font-semibold text-gray-900 mb-1">Invitar por enlace</h3>
+            <p className="text-xs text-gray-500 mb-4">Genera un enlace de invitación (válido 7 días) y envíalo por email o WhatsApp.</p>
+            <div className="grid grid-cols-2 gap-3 mb-3">
+              <input
+                className="input"
+                type="email"
+                placeholder="correo@empresa.com"
+                value={inviteForm.email}
+                onChange={(e) => setInviteForm((p) => ({ ...p, email: e.target.value }))}
+              />
+              <select className="input" value={inviteForm.role} onChange={(e) => setInviteForm((p) => ({ ...p, role: e.target.value }))}>
+                <option value="contador">Contador</option>
+                {isOwner && <option value="admin">Admin</option>}
+              </select>
+            </div>
+            <button onClick={sendInvite} disabled={inviteLoading} className="btn-primary flex items-center gap-2">
+              <Plus size={14} /> {inviteLoading ? "Generando..." : "Generar enlace"}
+            </button>
+
+            {/* Enlace generado */}
+            {inviteLink && (
+              <div className="mt-4 p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
+                <p className="text-xs font-medium text-emerald-700 mb-2">Enlace listo — cópialo y envíalo:</p>
+                <div className="flex items-center gap-2">
+                  <input readOnly className="input text-xs flex-1 bg-white" value={inviteLink} />
+                  <button
+                    onClick={() => { navigator.clipboard.writeText(inviteLink); flash("Enlace copiado", "ok"); }}
+                    className="btn-secondary text-xs shrink-0"
+                  >Copiar</button>
+                </div>
+              </div>
+            )}
+
+            {/* Invitaciones pendientes */}
+            {invites.length > 0 && (
+              <div className="mt-4">
+                <p className="text-xs font-medium text-gray-600 mb-2">Invitaciones pendientes ({invites.length})</p>
+                <div className="space-y-1">
+                  {invites.map((inv) => (
+                    <div key={inv.id} className="flex items-center justify-between py-1.5 px-3 bg-gray-50 rounded-lg text-xs">
+                      <div>
+                        <span className="font-medium text-gray-800">{inv.email}</span>
+                        <span className={`ml-2 px-1.5 py-0.5 rounded-full ${inv.role === "admin" ? "bg-blue-50 text-blue-600" : "bg-gray-100 text-gray-500"}`}>{inv.role}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-gray-400">
+                        <span>Expira {new Date(inv.expires_at).toLocaleDateString("es-CO")}</span>
+                        <button
+                          onClick={() => { navigator.clipboard.writeText(inv.invite_url); flash("Enlace copiado", "ok"); }}
+                          title="Copiar enlace"
+                          className="hover:text-brand-orange"
+                        ><RefreshCw size={11} /></button>
+                        <button onClick={() => revokeInvite(inv.id)} title="Revocar" className="hover:text-red-500"><X size={11} /></button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -616,33 +717,41 @@ export default function AdminPage() {
                         </div>
                       </div>
 
-                      {/* Miembros del grupo */}
+                      {/* Miembros del grupo — siempre visible */}
                       <div className="mt-3 pt-3 border-t border-gray-100">
                         <div className="flex items-center justify-between mb-2">
-                          <p className="text-xs font-medium text-gray-600">Miembros</p>
-                          <button onClick={() => loadGroupMembers(g.id)} className="text-gray-400 hover:text-gray-600 text-xs">Ver miembros</button>
+                          <p className="text-xs font-medium text-gray-600">
+                            Miembros ({(groupMembers[g.id] ?? []).length})
+                          </p>
+                          <button onClick={() => loadGroupMembers(g.id)} className="text-gray-400 hover:text-gray-600" title="Recargar">
+                            <RefreshCw size={11} />
+                          </button>
                         </div>
-                        {groupMembers[g.id] && (
-                          <div className="space-y-1">
-                            {groupMembers[g.id].map((m) => (
-                              <div key={m.id} className="flex items-center justify-between py-1 px-2 bg-gray-50 rounded-lg text-xs">
-                                <span className="text-gray-700">{m.email}</span>
-                                <button onClick={() => removeFromGroup(g.id, m.id)} className="text-gray-400 hover:text-red-500"><X size={12} /></button>
+                        <div className="space-y-1">
+                          {(groupMembers[g.id] ?? []).length === 0 && (
+                            <p className="text-xs text-gray-400 py-1">Sin miembros aún</p>
+                          )}
+                          {(groupMembers[g.id] ?? []).map((m) => (
+                            <div key={m.id} className="flex items-center justify-between py-1 px-2 bg-gray-50 rounded-lg text-xs">
+                              <div>
+                                <span className="font-medium text-gray-700">{m.email}</span>
+                                <span className={`ml-1.5 px-1.5 py-0.5 rounded-full ${m.role === "admin" ? "bg-blue-50 text-blue-600" : m.role === "owner" ? "bg-violet-50 text-violet-600" : "bg-gray-100 text-gray-500"}`}>{m.role}</span>
                               </div>
+                              <button onClick={() => removeFromGroup(g.id, m.id)} title="Quitar del grupo" className="text-gray-400 hover:text-red-500"><X size={12} /></button>
+                            </div>
+                          ))}
+                          {/* Agregar usuario */}
+                          <select
+                            className="input text-xs mt-2"
+                            onChange={(e) => { if (e.target.value) { addToGroup(g.id, e.target.value); e.target.value = ""; } }}
+                            defaultValue=""
+                          >
+                            <option value="">+ Agregar usuario...</option>
+                            {users.filter((u) => !(groupMembers[g.id] ?? []).find((m) => m.id === u.id)).map((u) => (
+                              <option key={u.id} value={u.id}>{u.email} — {u.role}</option>
                             ))}
-                            {/* Agregar usuario */}
-                            <select
-                              className="input text-xs mt-2"
-                              onChange={(e) => { if (e.target.value) { addToGroup(g.id, e.target.value); e.target.value = ""; } }}
-                              defaultValue=""
-                            >
-                              <option value="">+ Agregar usuario al grupo...</option>
-                              {users.filter((u) => !(groupMembers[g.id] ?? []).find((m) => m.id === u.id)).map((u) => (
-                                <option key={u.id} value={u.id}>{u.email} ({u.role})</option>
-                              ))}
-                            </select>
-                          </div>
-                        )}
+                          </select>
+                        </div>
                       </div>
                     </div>
                   )}

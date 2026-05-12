@@ -164,9 +164,9 @@ function SignupForm() {
                 type="password"
                 value={form.password}
                 onChange={(e) => update("password", e.target.value)}
-                placeholder="Mínimo 6 caracteres"
+                placeholder="Mínimo 8 caracteres"
                 required
-                minLength={6}
+                minLength={8}
                 autoComplete="new-password"
                 className="input"
               />

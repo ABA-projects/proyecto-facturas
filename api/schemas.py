@@ -251,3 +251,50 @@ class SuperadminOrgStats(BaseModel):
     active: bool
     users_count: int
     invoices_count: int
+
+
+# ── Invitations ───────────────────────────────────────────────────────────────
+
+class InviteCreate(BaseModel):
+    email: str
+    role: str = "contador"
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, v: str) -> str:
+        return v.strip().lower()
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, v: str) -> str:
+        if v not in ("admin", "contador"):
+            raise ValueError("Rol inválido. Opciones: admin, contador")
+        return v
+
+
+class InviteResponse(BaseModel):
+    id: str
+    email: str
+    role: str
+    invite_url: str
+    expires_at: datetime
+    used_at: Optional[datetime] = None
+    created_at: datetime
+
+
+class AcceptInviteRequest(BaseModel):
+    full_name: Optional[str] = None
+    password: str
+
+    @field_validator("password")
+    @classmethod
+    def password_strength(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("La contraseña debe tener al menos 8 caracteres")
+        return v
+
+
+class InviteInfoResponse(BaseModel):
+    email: str
+    role: str
+    org_name: str
