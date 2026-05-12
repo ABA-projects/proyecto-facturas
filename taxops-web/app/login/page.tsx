@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, FormEvent, Suspense } from "react";
+import { useState, useEffect, FormEvent, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 
@@ -15,6 +15,14 @@ function LoginForm() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [googleAvailable, setGoogleAvailable] = useState(false);
+
+  useEffect(() => {
+    fetch(`${API_URL}/auth/google/status`)
+      .then((r) => r.json())
+      .then((d) => setGoogleAvailable(d.available === true))
+      .catch(() => setGoogleAvailable(false));
+  }, []);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -68,19 +76,10 @@ function LoginForm() {
             Iniciar sesión
           </h1>
 
-          {/* Google */}
-          <button
+          {/* Google — solo visible si está configurado */}
+          {googleAvailable && <button
             type="button"
-            onClick={async () => {
-              setError("");
-              // Verify Google OAuth is configured before navigating
-              const probe = await fetch(`${API_URL}/auth/google`, { redirect: "manual" }).catch(() => null);
-              if (probe && (probe.status === 501 || probe.status === 0)) {
-                setError("Inicio de sesión con Google no está configurado. Usa tu correo y contraseña.");
-                return;
-              }
-              window.location.href = `${API_URL}/auth/google`;
-            }}
+            onClick={() => { window.location.href = `${API_URL}/auth/google`; }}
             className="w-full flex items-center justify-center gap-3 border border-gray-300 rounded-xl px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors mb-4"
           >
             <svg width="18" height="18" viewBox="0 0 18 18">
@@ -90,7 +89,7 @@ function LoginForm() {
               <path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/>
             </svg>
             Continuar con Google
-          </button>
+          </button>}
 
           <div className="relative mb-4">
             <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-200" /></div>

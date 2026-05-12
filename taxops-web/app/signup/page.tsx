@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, FormEvent, Suspense, useEffect } from "react";
+import { useState, useEffect, FormEvent, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 
@@ -9,6 +9,15 @@ const API_URL = "/api-proxy";
 function SignupForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
+
+  const [googleAvailable, setGoogleAvailable] = useState(false);
+
+  useEffect(() => {
+    fetch(`${API_URL}/auth/google/status`)
+      .then((r) => r.json())
+      .then((d) => setGoogleAvailable(d.available === true))
+      .catch(() => setGoogleAvailable(false));
+  }, []);
 
   const [form, setForm] = useState({
     email: searchParams.get("email") ?? "",
@@ -93,8 +102,8 @@ function SignupForm() {
           <h1 className="text-xl font-bold text-gray-900 mb-2">Crear cuenta gratis</h1>
           <p className="text-sm text-gray-500 mb-6">Sin tarjeta de crédito · 14 días gratis</p>
 
-          {/* Google */}
-          <button
+          {/* Google — solo visible si está configurado */}
+          {googleAvailable && <button
             type="button"
             onClick={handleGoogle}
             className="w-full flex items-center justify-center gap-3 border border-gray-300 rounded-xl px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors mb-4"
@@ -106,12 +115,12 @@ function SignupForm() {
               <path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/>
             </svg>
             Continuar con Google
-          </button>
+          </button>}
 
-          <div className="relative mb-4">
+          {googleAvailable && <div className="relative mb-4">
             <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-200" /></div>
             <div className="relative flex justify-center text-xs text-gray-400 bg-white px-2 w-fit mx-auto">o regístrate con email</div>
-          </div>
+          </div>}
 
           {error && (
             <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">

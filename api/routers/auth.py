@@ -95,6 +95,13 @@ async def register(body: RegisterRequest) -> TokenResponse:
 
 # ── Google OAuth ──────────────────────────────────────────────────────────────
 
+@router.get("/google/status")
+async def google_status() -> dict:
+    """Indica si Google OAuth está configurado (sin credenciales)."""
+    from core.config import get_settings
+    return {"available": bool(get_settings().GOOGLE_CLIENT_ID)}
+
+
 @router.get("/google")
 async def google_login(request: Request) -> RedirectResponse:
     """Redirect to Google OAuth consent screen."""
