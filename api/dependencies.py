@@ -34,6 +34,12 @@ async def require_admin(user: dict = Depends(get_current_user)) -> dict:
     return user
 
 
+async def require_owner(user: dict = Depends(get_current_user)) -> dict:
+    if user["role"] != "owner":
+        raise HTTPException(status_code=403, detail="Requiere rol owner")
+    return user
+
+
 async def require_superadmin(user: dict = Depends(get_current_user)) -> dict:
     s = get_settings()
     allowed = {e.strip().lower() for e in s.TAXOPS_SUPERADMIN_EMAILS.split(",") if e.strip()}

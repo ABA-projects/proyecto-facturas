@@ -207,6 +207,40 @@ class AdminStats(BaseModel):
     total_clients: int
     invoices_this_month: int
     recent_sessions: list[dict[str, Any]]
+    # Extended financial + operational metrics
+    invoices_by_month: list[dict[str, Any]] = []
+    top_providers: list[dict[str, Any]] = []
+    active_users_today: int = 0
+    modules_usage: list[dict[str, Any]] = []
+    error_rate: float = 0.0
+    total_nomina: int = 0
+
+
+class GroupCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+    modules: list[str] = []
+
+
+class GroupResponse(BaseModel):
+    id: str
+    org_id: str
+    name: str
+    description: Optional[str] = None
+    modules: list[str]
+    created_at: datetime
+    members_count: int = 0
+
+
+class AuditLogEntry(BaseModel):
+    id: str
+    user_email: Optional[str] = None
+    action: str
+    module: str
+    resource_type: Optional[str] = None
+    resource_id: Optional[str] = None
+    details: Optional[dict[str, Any]] = None
+    created_at: datetime
 
 
 class SuperadminOrgStats(BaseModel):

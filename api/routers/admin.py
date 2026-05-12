@@ -1,16 +1,22 @@
-"""Admin router — stats, users CRUD, clients, superadmin."""
+"""Admin router — stats, users CRUD, groups, audit log, clients, superadmin."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+import json
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import text
 
-from dependencies import get_current_user, require_admin, require_superadmin
+from dependencies import get_current_user, require_admin, require_owner, require_superadmin
 from schemas import (
     AdminStats,
+    AuditLogEntry,
     ClientResponse,
     CreateClientRequest,
     CreateOrgRequest,
     CreateUserRequest,
+    GroupCreate,
+    GroupResponse,
     OrgResponse,
     SuperadminOrgStats,
     UpdateUserRequest,
@@ -26,6 +32,32 @@ def _get_db():
     if not db_available():
         raise HTTPException(status_code=503, detail="Base de datos no disponible")
     return get_db
+
+
+def _log(db, *, org_id: str, user: dict, action: str, module: str = "admin",
+         resource_type: Optional[str] = None, resource_id: Optional[str] = None,
+         details: Optional[dict] = None) -> None:
+    """Insert an audit log entry. Never raises — failures are silent."""
+    try:
+        db.execute(
+            text("""
+                INSERT INTO audit_logs
+                    (org_id, user_id, user_email, action, module, resource_type, resource_id, details)
+                VALUES (:org_id, :user_id, :email, :action, :module, :rtype, :rid, :details)
+            """),
+            {
+                "org_id": org_id,
+                "user_id": user.get("user_id"),
+                "email": user.get("email"),
+                "action": action,
+                "module": module,
+                "rtype": resource_type,
+                "rid": resource_id,
+                "details": json.dumps(details) if details else None,
+            },
+        )
+    except Exception:
+        pass
 
 
 # ── Dashboard stats ───────────────────────────────────────────────────────────
@@ -44,7 +76,7 @@ async def get_stats(user: dict = Depends(require_admin)) -> AdminStats:
                 text("SELECT COUNT(*) FROM exogenas_results WHERE org_id = :o"), {"o": org}
             ).scalar() or 0
             total_usr = db.execute(
-                text("SELECT COUNT(*) FROM users WHERE org_id = :o"), {"o": org}
+                text("SELECT COUNT(*) FROM users WHERE org_id = :o AND deleted_at IS NULL"), {"o": org}
             ).scalar() or 0
             total_cli = db.execute(
                 text("SELECT COUNT(*) FROM clients WHERE org_id = :o"), {"o": org}
@@ -64,8 +96,74 @@ async def get_stats(user: dict = Depends(require_admin)) -> AdminStats:
                 ),
                 {"o": org},
             ).mappings().fetchall()
+
+            # Financial: invoices by month (last 6 months)
+            inv_by_month = db.execute(
+                text("""
+                    SELECT periodo AS month, COUNT(*) AS count,
+                           COALESCE(SUM(total), 0) AS total_amount
+                    FROM invoices
+                    WHERE org_id = :o
+                      AND periodo >= TO_CHAR(NOW() - INTERVAL '5 months', 'YYYY-MM')
+                    GROUP BY periodo ORDER BY periodo
+                """),
+                {"o": org},
+            ).mappings().fetchall()
+
+            # Financial: top 5 providers by invoice count
+            top_prov = db.execute(
+                text("""
+                    SELECT nombre_emisor AS name,
+                           COUNT(*) AS count,
+                           COALESCE(SUM(total), 0) AS total_amount
+                    FROM invoices
+                    WHERE org_id = :o AND nombre_emisor IS NOT NULL
+                    GROUP BY nombre_emisor
+                    ORDER BY count DESC LIMIT 5
+                """),
+                {"o": org},
+            ).mappings().fetchall()
+
+            # Operational: users active today (last_login_at today)
+            active_today = db.execute(
+                text(
+                    "SELECT COUNT(*) FROM users WHERE org_id = :o "
+                    "AND DATE(last_login_at) = CURRENT_DATE AND deleted_at IS NULL"
+                ),
+                {"o": org},
+            ).scalar() or 0
+
+            # Operational: modules usage from audit_logs (last 30 days)
+            modules_usage = db.execute(
+                text("""
+                    SELECT module, COUNT(*) AS actions
+                    FROM audit_logs
+                    WHERE org_id = :o
+                      AND created_at >= NOW() - INTERVAL '30 days'
+                    GROUP BY module ORDER BY actions DESC
+                """),
+                {"o": org},
+            ).mappings().fetchall()
+
+            # Operational: error rate from processing sessions
+            total_sessions = db.execute(
+                text("SELECT COUNT(*) FROM processing_sessions WHERE org_id = :o"), {"o": org}
+            ).scalar() or 0
+            error_sessions = db.execute(
+                text("SELECT COUNT(*) FROM processing_sessions WHERE org_id = :o AND status = 'failed'"),
+                {"o": org},
+            ).scalar() or 0
+
+            # Operational: total nomina calculations
+            total_nomina = db.execute(
+                text("SELECT COUNT(*) FROM audit_logs WHERE org_id = :o AND module = 'nomina'"),
+                {"o": org},
+            ).scalar() or 0
+
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+
+    error_rate = round((error_sessions / total_sessions * 100) if total_sessions else 0.0, 1)
 
     return AdminStats(
         total_invoices=total_inv,
@@ -74,6 +172,12 @@ async def get_stats(user: dict = Depends(require_admin)) -> AdminStats:
         total_clients=total_cli,
         invoices_this_month=this_month,
         recent_sessions=[dict(s) for s in sessions],
+        invoices_by_month=[dict(r) for r in inv_by_month],
+        top_providers=[dict(r) for r in top_prov],
+        active_users_today=active_today,
+        modules_usage=[dict(r) for r in modules_usage],
+        error_rate=error_rate,
+        total_nomina=total_nomina,
     )
 
 
@@ -86,7 +190,7 @@ async def list_users(user: dict = Depends(require_admin)) -> list[UserResponse]:
         rows = db.execute(
             text(
                 "SELECT id, org_id, email, full_name, role, active, last_login_at, created_at "
-                "FROM users WHERE org_id = :o ORDER BY created_at DESC"
+                "FROM users WHERE org_id = :o AND deleted_at IS NULL ORDER BY created_at DESC"
             ),
             {"o": user["org_id"]},
         ).mappings().fetchall()
@@ -131,6 +235,11 @@ async def create_user(
                     "role": body.role,
                 },
             ).mappings().fetchone()
+            _log(db, org_id=admin["org_id"], user=admin, action="create_user",
+                 resource_type="user", resource_id=str(row["id"]),
+                 details={"email": body.email, "role": body.role})
+    except HTTPException:
+        raise
     except Exception as exc:
         if "unique" in str(exc).lower():
             raise HTTPException(status_code=409, detail="Email ya registrado")
@@ -165,9 +274,11 @@ async def update_user(
 
     with get_db() as db:
         db.execute(
-            text(f"UPDATE users SET {set_clause} WHERE id = :_user_id AND org_id = :_org_id"),
+            text(f"UPDATE users SET {set_clause} WHERE id = :_user_id AND org_id = :_org_id AND deleted_at IS NULL"),
             updates,
         )
+        _log(db, org_id=admin["org_id"], user=admin, action="update_user",
+             resource_type="user", resource_id=user_id, details=updates)
     return {"message": "Usuario actualizado"}
 
 
@@ -179,15 +290,70 @@ async def deactivate_user(
     get_db = _get_db()
     with get_db() as db:
         db.execute(
-            text("UPDATE users SET active = FALSE WHERE id = :id AND org_id = :o"),
+            text("UPDATE users SET active = FALSE WHERE id = :id AND org_id = :o AND deleted_at IS NULL"),
             {"id": user_id, "o": admin["org_id"]},
         )
+        _log(db, org_id=admin["org_id"], user=admin, action="deactivate_user",
+             resource_type="user", resource_id=user_id)
     return {"message": "Usuario desactivado"}
+
+
+@router.delete("/users/{user_id}/permanent")
+async def hard_delete_user(
+    user_id: str,
+    owner: dict = Depends(require_owner),
+) -> dict:
+    """Borrado permanente (owner only). Anonymiza email antes de eliminar."""
+    get_db = _get_db()
+    with get_db() as db:
+        # Check the user exists and is not the owner themselves
+        target = db.execute(
+            text("SELECT id, email, role FROM users WHERE id = :id AND org_id = :o AND deleted_at IS NULL"),
+            {"id": user_id, "o": owner["org_id"]},
+        ).mappings().fetchone()
+        if not target:
+            raise HTTPException(status_code=404, detail="Usuario no encontrado")
+        if target["role"] == "owner":
+            raise HTTPException(status_code=403, detail="No se puede eliminar al owner")
+        if str(target["id"]) == owner["user_id"]:
+            raise HTTPException(status_code=403, detail="No puedes eliminarte a ti mismo")
+
+        _log(db, org_id=owner["org_id"], user=owner, action="hard_delete_user",
+             resource_type="user", resource_id=user_id,
+             details={"email": target["email"], "role": target["role"]})
+
+        # Mark as deleted (keeps referential integrity for audit logs)
+        db.execute(
+            text("""
+                UPDATE users
+                SET deleted_at = NOW(), active = FALSE,
+                    email = CONCAT('deleted_', :uid, '@deleted.local'),
+                    hashed_password = 'DELETED'
+                WHERE id = :id AND org_id = :o
+            """),
+            {"id": user_id, "o": owner["org_id"], "uid": user_id},
+        )
+    return {"message": "Usuario eliminado permanentemente"}
+
+
+@router.post("/users/{user_id}/reactivate")
+async def reactivate_user(
+    user_id: str,
+    admin: dict = Depends(require_admin),
+) -> dict:
+    get_db = _get_db()
+    with get_db() as db:
+        db.execute(
+            text("UPDATE users SET active = TRUE WHERE id = :id AND org_id = :o AND deleted_at IS NULL"),
+            {"id": user_id, "o": admin["org_id"]},
+        )
+        _log(db, org_id=admin["org_id"], user=admin, action="reactivate_user",
+             resource_type="user", resource_id=user_id)
+    return {"message": "Usuario reactivado"}
 
 
 @router.get("/users/admin-requests")
 async def list_admin_requests(admin: dict = Depends(require_admin)) -> list[dict]:
-    """Lista contadores que han solicitado ser promovidos a admin."""
     get_db = _get_db()
     with get_db() as db:
         rows = db.execute(
@@ -196,7 +362,7 @@ async def list_admin_requests(admin: dict = Depends(require_admin)) -> list[dict
                 FROM users
                 WHERE org_id = :o AND role = 'contador'
                   AND admin_requested_at IS NOT NULL
-                  AND active = TRUE
+                  AND active = TRUE AND deleted_at IS NULL
                 ORDER BY admin_requested_at ASC
             """),
             {"o": admin["org_id"]},
@@ -209,21 +375,238 @@ async def approve_admin(
     user_id: str,
     admin: dict = Depends(require_admin),
 ) -> dict:
-    """Promueve un contador a admin y limpia la solicitud."""
     get_db = _get_db()
     with get_db() as db:
         result = db.execute(
             text("""
                 UPDATE users
                 SET role = 'admin', admin_requested_at = NULL
-                WHERE id = :id AND org_id = :o AND role = 'contador'
+                WHERE id = :id AND org_id = :o AND role = 'contador' AND deleted_at IS NULL
                 RETURNING id
             """),
             {"id": user_id, "o": admin["org_id"]},
         ).fetchone()
     if result is None:
         raise HTTPException(status_code=404, detail="Usuario no encontrado o ya es admin")
+    with _get_db()() as db:
+        _log(db, org_id=admin["org_id"], user=admin, action="promote_to_admin",
+             resource_type="user", resource_id=user_id)
     return {"message": "Usuario promovido a admin"}
+
+
+# ── Groups ────────────────────────────────────────────────────────────────────
+
+@router.get("/groups", response_model=list[GroupResponse])
+async def list_groups(owner: dict = Depends(require_owner)) -> list[GroupResponse]:
+    get_db = _get_db()
+    with get_db() as db:
+        rows = db.execute(
+            text("""
+                SELECT g.id, g.org_id, g.name, g.description, g.modules, g.created_at,
+                       COUNT(ug.user_id) AS members_count
+                FROM groups g
+                LEFT JOIN user_groups ug ON ug.group_id = g.id
+                WHERE g.org_id = :o
+                GROUP BY g.id ORDER BY g.created_at DESC
+            """),
+            {"o": owner["org_id"]},
+        ).mappings().fetchall()
+    return [
+        GroupResponse(
+            id=str(r["id"]),
+            org_id=str(r["org_id"]),
+            name=r["name"],
+            description=r["description"],
+            modules=list(r["modules"] or []),
+            created_at=r["created_at"],
+            members_count=r["members_count"],
+        )
+        for r in rows
+    ]
+
+
+@router.post("/groups", response_model=GroupResponse, status_code=201)
+async def create_group(
+    body: GroupCreate,
+    owner: dict = Depends(require_owner),
+) -> GroupResponse:
+    get_db = _get_db()
+    try:
+        with get_db() as db:
+            row = db.execute(
+                text("""
+                    INSERT INTO groups (org_id, name, description, modules)
+                    VALUES (:o, :name, :desc, :modules)
+                    RETURNING id, org_id, name, description, modules, created_at
+                """),
+                {
+                    "o": owner["org_id"],
+                    "name": body.name,
+                    "desc": body.description,
+                    "modules": body.modules,
+                },
+            ).mappings().fetchone()
+            _log(db, org_id=owner["org_id"], user=owner, action="create_group",
+                 resource_type="group", resource_id=str(row["id"]),
+                 details={"name": body.name})
+    except Exception as exc:
+        if "unique" in str(exc).lower():
+            raise HTTPException(status_code=409, detail="Nombre de grupo ya existe")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return GroupResponse(
+        id=str(row["id"]),
+        org_id=str(row["org_id"]),
+        name=row["name"],
+        description=row["description"],
+        modules=list(row["modules"] or []),
+        created_at=row["created_at"],
+        members_count=0,
+    )
+
+
+@router.patch("/groups/{group_id}")
+async def update_group(
+    group_id: str,
+    body: GroupCreate,
+    owner: dict = Depends(require_owner),
+) -> dict:
+    get_db = _get_db()
+    with get_db() as db:
+        db.execute(
+            text("""
+                UPDATE groups SET name = :name, description = :desc, modules = :modules
+                WHERE id = :id AND org_id = :o
+            """),
+            {"id": group_id, "o": owner["org_id"], "name": body.name,
+             "desc": body.description, "modules": body.modules},
+        )
+        _log(db, org_id=owner["org_id"], user=owner, action="update_group",
+             resource_type="group", resource_id=group_id)
+    return {"message": "Grupo actualizado"}
+
+
+@router.delete("/groups/{group_id}")
+async def delete_group(
+    group_id: str,
+    owner: dict = Depends(require_owner),
+) -> dict:
+    get_db = _get_db()
+    with get_db() as db:
+        db.execute(
+            text("DELETE FROM groups WHERE id = :id AND org_id = :o"),
+            {"id": group_id, "o": owner["org_id"]},
+        )
+        _log(db, org_id=owner["org_id"], user=owner, action="delete_group",
+             resource_type="group", resource_id=group_id)
+    return {"message": "Grupo eliminado"}
+
+
+@router.post("/groups/{group_id}/members/{user_id}")
+async def add_user_to_group(
+    group_id: str,
+    user_id: str,
+    owner: dict = Depends(require_owner),
+) -> dict:
+    get_db = _get_db()
+    with get_db() as db:
+        db.execute(
+            text("INSERT INTO user_groups (user_id, group_id) VALUES (:u, :g) ON CONFLICT DO NOTHING"),
+            {"u": user_id, "g": group_id},
+        )
+        _log(db, org_id=owner["org_id"], user=owner, action="add_to_group",
+             resource_type="user", resource_id=user_id,
+             details={"group_id": group_id})
+    return {"message": "Usuario agregado al grupo"}
+
+
+@router.delete("/groups/{group_id}/members/{user_id}")
+async def remove_user_from_group(
+    group_id: str,
+    user_id: str,
+    owner: dict = Depends(require_owner),
+) -> dict:
+    get_db = _get_db()
+    with get_db() as db:
+        db.execute(
+            text("DELETE FROM user_groups WHERE user_id = :u AND group_id = :g"),
+            {"u": user_id, "g": group_id},
+        )
+        _log(db, org_id=owner["org_id"], user=owner, action="remove_from_group",
+             resource_type="user", resource_id=user_id,
+             details={"group_id": group_id})
+    return {"message": "Usuario removido del grupo"}
+
+
+@router.get("/groups/{group_id}/members")
+async def list_group_members(
+    group_id: str,
+    owner: dict = Depends(require_owner),
+) -> list[dict]:
+    get_db = _get_db()
+    with get_db() as db:
+        rows = db.execute(
+            text("""
+                SELECT u.id, u.email, u.full_name, u.role, u.active
+                FROM users u
+                JOIN user_groups ug ON ug.user_id = u.id
+                WHERE ug.group_id = :g AND u.org_id = :o AND u.deleted_at IS NULL
+            """),
+            {"g": group_id, "o": owner["org_id"]},
+        ).mappings().fetchall()
+    return [dict(r) for r in rows]
+
+
+# ── Audit Log ─────────────────────────────────────────────────────────────────
+
+@router.get("/audit-logs", response_model=list[AuditLogEntry])
+async def list_audit_logs(
+    admin: dict = Depends(require_admin),
+    module: Optional[str] = Query(None),
+    action: Optional[str] = Query(None),
+    user_email: Optional[str] = Query(None),
+    limit: int = Query(100, le=500),
+) -> list[AuditLogEntry]:
+    get_db = _get_db()
+    filters = ["org_id = :o"]
+    params: dict = {"o": admin["org_id"], "limit": limit}
+
+    if module:
+        filters.append("module = :module")
+        params["module"] = module
+    if action:
+        filters.append("action ILIKE :action")
+        params["action"] = f"%{action}%"
+    if user_email:
+        filters.append("user_email ILIKE :uemail")
+        params["uemail"] = f"%{user_email}%"
+
+    where = " AND ".join(filters)
+    with get_db() as db:
+        rows = db.execute(
+            text(f"""
+                SELECT id, user_email, action, module, resource_type, resource_id, details, created_at
+                FROM audit_logs
+                WHERE {where}
+                ORDER BY created_at DESC
+                LIMIT :limit
+            """),
+            params,
+        ).mappings().fetchall()
+
+    return [
+        AuditLogEntry(
+            id=str(r["id"]),
+            user_email=r["user_email"],
+            action=r["action"],
+            module=r["module"],
+            resource_type=r["resource_type"],
+            resource_id=r["resource_id"],
+            details=r["details"],
+            created_at=r["created_at"],
+        )
+        for r in rows
+    ]
 
 
 # ── Clients ──────────────────────────────────────────────────────────────────
@@ -268,6 +651,8 @@ async def create_client(
                 ),
                 {"o": admin["org_id"], "nit": body.nit, "rs": body.razon_social},
             ).mappings().fetchone()
+            _log(db, org_id=admin["org_id"], user=admin, action="create_client",
+                 resource_type="client", resource_id=str(row["id"]))
     except Exception as exc:
         if "unique" in str(exc).lower():
             raise HTTPException(status_code=409, detail="NIT ya registrado en esta organización")
@@ -388,17 +773,16 @@ async def add_autorretenedor(body: dict, admin: dict = Depends(require_admin)) -
     if not nit:
         raise HTTPException(status_code=422, detail="NIT requerido")
     get_db = _get_db()
-    try:
-        with get_db() as db:
-            db.execute(
-                text(
-                    "INSERT INTO autorretenedores (nit, razon_social) VALUES (:nit, :rs) "
-                    "ON CONFLICT (nit) DO UPDATE SET vigente = TRUE, razon_social = EXCLUDED.razon_social, updated_at = NOW()"
-                ),
-                {"nit": nit, "rs": razon_social},
-            )
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+    with get_db() as db:
+        db.execute(
+            text(
+                "INSERT INTO autorretenedores (nit, razon_social) VALUES (:nit, :rs) "
+                "ON CONFLICT (nit) DO UPDATE SET vigente = TRUE, razon_social = EXCLUDED.razon_social, updated_at = NOW()"
+            ),
+            {"nit": nit, "rs": razon_social},
+        )
+        _log(db, org_id=admin["org_id"], user=admin, action="add_autorretenedor",
+             resource_type="autorretenedor", resource_id=nit)
     return {"nit": nit, "message": "Autorretenedor agregado"}
 
 
@@ -410,6 +794,8 @@ async def remove_autorretenedor(nit: str, admin: dict = Depends(require_admin)) 
             text("UPDATE autorretenedores SET vigente = FALSE, updated_at = NOW() WHERE nit = :nit"),
             {"nit": nit},
         )
+        _log(db, org_id=admin["org_id"], user=admin, action="remove_autorretenedor",
+             resource_type="autorretenedor", resource_id=nit)
     return {"message": "NIT desactivado"}
 
 
@@ -491,4 +877,6 @@ async def update_org(body: dict, admin: dict = Depends(require_admin)) -> dict:
             text(f"UPDATE organizations SET {set_clause} WHERE id = :_org_id"),
             updates,
         )
+        _log(db, org_id=admin["org_id"], user=admin, action="update_org",
+             resource_type="org", details=updates)
     return {"message": "Organización actualizada"}

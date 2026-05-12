@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS users (
     active          BOOLEAN     NOT NULL DEFAULT TRUE,
     admin_requested_at TIMESTAMPTZ,                          -- solicitud de promoción a admin
     last_login_at   TIMESTAMPTZ,
+    deleted_at      TIMESTAMPTZ,                             -- borrado permanente (soft-hard)
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -182,3 +183,41 @@ CREATE TABLE IF NOT EXISTS exogenas_results (
     UNIQUE (org_id, nit, concepto, anio)
 );
 CREATE INDEX IF NOT EXISTS ix_exogenas_results_org_id ON exogenas_results(org_id);
+
+-- ────────────────────────────────────────────────────────────
+-- GROUPS — grupos de usuarios con permisos por módulo
+-- ────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS groups (
+    id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    org_id      UUID        NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    name        TEXT        NOT NULL,
+    description TEXT,
+    modules     TEXT[]      NOT NULL DEFAULT '{}',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (org_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS user_groups (
+    user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    group_id    UUID NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+    PRIMARY KEY (user_id, group_id)
+);
+
+-- ────────────────────────────────────────────────────────────
+-- AUDIT_LOGS — trazabilidad completa de acciones
+-- ────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    org_id          UUID        NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    user_id         UUID        REFERENCES users(id) ON DELETE SET NULL,
+    user_email      TEXT,
+    action          TEXT        NOT NULL,
+    module          TEXT        NOT NULL DEFAULT 'admin',
+    resource_type   TEXT,
+    resource_id     TEXT,
+    details         JSONB,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_logs_org_created ON audit_logs (org_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs (user_id);
