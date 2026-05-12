@@ -65,7 +65,13 @@ function SignupForm() {
     }
   }
 
-  function handleGoogle() {
+  async function handleGoogle() {
+    setError("");
+    const probe = await fetch(`${API_URL}/auth/google`, { redirect: "manual" }).catch(() => null);
+    if (probe && (probe.status === 501 || probe.status === 0)) {
+      setError("Registro con Google no está configurado. Usa tu correo y contraseña.");
+      return;
+    }
     window.location.href = `${API_URL}/auth/google`;
   }
 

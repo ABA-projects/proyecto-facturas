@@ -375,3 +375,64 @@ async def request_admin(user: dict = Depends(get_current_user)) -> dict:
         raise HTTPException(status_code=503, detail="Error de base de datos") from exc
 
     return {"message": "Solicitud enviada. Un administrador revisará tu solicitud."}
+
+
+@router.patch("/me")
+async def update_me(body: dict, user: dict = Depends(get_current_user)) -> dict:
+    """Actualiza nombre y/o contraseña del usuario autenticado."""
+    from db.database import get_db
+    from db.auth import hash_password, verify_password
+    from sqlalchemy import text
+
+    full_name = body.get("full_name")
+    current_password = body.get("current_password")
+    new_password = body.get("new_password")
+
+    if not full_name and not new_password:
+        raise HTTPException(status_code=422, detail="Nada que actualizar")
+
+    with get_db() as db:
+        if new_password:
+            if len(new_password) < 8:
+                raise HTTPException(status_code=422, detail="La contraseña debe tener al menos 8 caracteres")
+            if not current_password:
+                raise HTTPException(status_code=422, detail="Debes ingresar tu contraseña actual")
+            row = db.execute(
+                text("SELECT hashed_password FROM users WHERE id = :id"),
+                {"id": user["user_id"]},
+            ).mappings().fetchone()
+            if not row or not verify_password(current_password, row["hashed_password"]):
+                raise HTTPException(status_code=400, detail="Contraseña actual incorrecta")
+
+        updates: dict = {}
+        if full_name is not None:
+            updates["full_name"] = full_name.strip()
+        if new_password:
+            updates["hashed_password"] = hash_password(new_password)
+
+        if updates:
+            set_clause = ", ".join(f"{k} = :{k}" for k in updates)
+            updates["_id"] = user["user_id"]
+            db.execute(text(f"UPDATE users SET {set_clause} WHERE id = :_id"), updates)
+
+    return {"message": "Perfil actualizado"}
+
+
+@router.get("/me/groups")
+async def my_groups(user: dict = Depends(get_current_user)) -> list[dict]:
+    """Grupos a los que pertenece el usuario autenticado."""
+    from db.database import get_db
+    from sqlalchemy import text
+
+    with get_db() as db:
+        rows = db.execute(
+            text("""
+                SELECT g.id, g.name, g.description, g.modules
+                FROM groups g
+                JOIN user_groups ug ON ug.group_id = g.id
+                WHERE ug.user_id = :uid
+                ORDER BY g.name
+            """),
+            {"uid": user["user_id"]},
+        ).mappings().fetchall()
+    return [{"id": str(r["id"]), "name": r["name"], "description": r["description"], "modules": r["modules"]} for r in rows]
