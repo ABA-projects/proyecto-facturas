@@ -11,10 +11,7 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+  workflow_dispatch:  # desactivado — activar manualmente si se necesita
 
 # Cancela runs anteriores del mismo PR si llega uno nuevo
 concurrency:

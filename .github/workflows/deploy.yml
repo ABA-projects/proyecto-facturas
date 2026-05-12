@@ -19,10 +19,7 @@
 name: Deploy to Railway
 
 on:
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
-    branches: [main]
+  workflow_dispatch:  # desactivado — activar manualmente si se necesita
 
 jobs:
   deploy:
