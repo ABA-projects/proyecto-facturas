@@ -713,6 +713,53 @@ async def list_orgs(_: dict = Depends(require_superadmin)) -> list[SuperadminOrg
     ]
 
 
+@router.get("/superadmin/users")
+async def superadmin_list_users(_: dict = Depends(require_superadmin)) -> list[dict]:
+    """Todos los usuarios de todas las organizaciones."""
+    get_db = _get_db()
+    with get_db() as db:
+        rows = db.execute(
+            text("""
+                SELECT u.id, u.email, u.full_name, u.role, u.active,
+                       u.admin_requested_at, u.created_at,
+                       o.name AS org_name, o.id AS org_id
+                FROM users u
+                JOIN organizations o ON o.id = u.org_id
+                WHERE u.deleted_at IS NULL
+                ORDER BY o.name, u.created_at
+            """)
+        ).mappings().fetchall()
+    return [
+        {
+            "id": str(r["id"]), "email": r["email"], "full_name": r["full_name"],
+            "role": r["role"], "active": r["active"],
+            "admin_requested_at": r["admin_requested_at"].isoformat() if r["admin_requested_at"] else None,
+            "created_at": r["created_at"].isoformat(),
+            "org_name": r["org_name"], "org_id": str(r["org_id"]),
+        }
+        for r in rows
+    ]
+
+
+@router.patch("/superadmin/users/{user_id}/role")
+async def superadmin_change_role(
+    user_id: str,
+    body: "ChangeRoleRequest",
+    _: dict = Depends(require_superadmin),
+) -> dict:
+    """Superadmin cambia el rol de cualquier usuario en cualquier org."""
+    from schemas import ChangeRoleRequest  # noqa: F401
+    get_db = _get_db()
+    with get_db() as db:
+        result = db.execute(
+            text("UPDATE users SET role = :r, admin_requested_at = NULL WHERE id = :id AND deleted_at IS NULL RETURNING id"),
+            {"r": body.role, "id": user_id},
+        ).fetchone()
+    if result is None:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    return {"message": f"Rol actualizado a {body.role}"}
+
+
 @router.post("/superadmin/orgs", response_model=OrgResponse, status_code=201)
 async def create_org(
     body: CreateOrgRequest,

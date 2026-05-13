@@ -11,12 +11,14 @@ _s = get_settings()
 
 
 def create_access_token(sub: str, org_id: str, role: str, email: str) -> str:
+    allowed = {e.strip().lower() for e in _s.TAXOPS_SUPERADMIN_EMAILS.split(",") if e.strip()}
     return jwt.encode(
         {
             "sub": sub,
             "org_id": org_id,
             "role": role,
             "email": email,
+            "is_superadmin": email.lower() in allowed,
             "type": "access",
             "exp": datetime.now(timezone.utc) + timedelta(minutes=_s.ACCESS_TOKEN_EXPIRE_MINUTES),
         },

@@ -73,7 +73,7 @@ async def register(body: RegisterRequest) -> TokenResponse:
             user = db.execute(
                 text("""
                     INSERT INTO users (org_id, email, hashed_password, full_name, role)
-                    VALUES (:o, :e, :h, :f, 'owner')
+                    VALUES (:o, :e, :h, :f, 'auxiliar_contable')
                     RETURNING id, org_id, role, email
                 """),
                 {"o": org["id"], "e": body.email, "h": hashed, "f": body.full_name or ""},

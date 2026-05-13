@@ -23,6 +23,7 @@ async def get_current_user(
             "org_id": payload["org_id"],
             "role": payload["role"],
             "email": payload["email"],
+            "is_superadmin": bool(payload.get("is_superadmin", False)),
         }
     except (JWTError, KeyError):
         raise HTTPException(status_code=401, detail="Token inválido o expirado")

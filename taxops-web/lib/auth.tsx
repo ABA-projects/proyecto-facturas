@@ -53,6 +53,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         org_id: payload.org_id,
         email: payload.email,
         role: payload.role,
+        is_superadmin: payload.is_superadmin ?? false,
       };
     } catch {
       return null;
