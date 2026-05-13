@@ -684,6 +684,12 @@ async def create_client(
 
 # ── Superadmin ────────────────────────────────────────────────────────────────
 
+@router.get("/superadmin/check")
+async def superadmin_check(_: dict = Depends(require_superadmin)) -> dict:
+    """Verifica si el usuario actual es superadmin. 200 = sí, 403 = no."""
+    return {"is_superadmin": True}
+
+
 @router.get("/superadmin/orgs", response_model=list[SuperadminOrgStats])
 async def list_orgs(_: dict = Depends(require_superadmin)) -> list[SuperadminOrgStats]:
     get_db = _get_db()

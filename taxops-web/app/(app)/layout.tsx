@@ -8,11 +8,13 @@ import { AuthProvider, useAuth } from "@/lib/auth";
 
 const API_URL = "/api-proxy";
 
+const BASE_ROLES = ["contador", "auxiliar_contable"];
+
 function AdminRequestBanner() {
   const { token, user } = useAuth();
   const [status, setStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
 
-  if (!user || user.role !== "contador") return null;
+  if (!user || !BASE_ROLES.includes(user.role)) return null;
 
   async function handleRequest() {
     setStatus("loading");
@@ -48,14 +50,20 @@ function AdminRequestBanner() {
 }
 
 function AppShell({ children }: { children: React.ReactNode }) {
-  const { token, loadSession, loading } = useAuth();
+  const { token, loadSession, loading, setSuperadmin } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    // Al montar, intentar renovar el access token con el refresh cookie
-    loadSession().catch(() => {
-      router.push("/login");
-    });
+    loadSession()
+      .then(() => {
+        // Chequeo superadmin en tiempo real — independiente del JWT
+        const t = sessionStorage.getItem("taxops_token");
+        if (!t) return;
+        fetch(`${API_URL}/admin/superadmin/check`, { headers: { Authorization: `Bearer ${t}` } })
+          .then((r) => { if (r.ok) setSuperadmin(true); })
+          .catch(() => {});
+      })
+      .catch(() => { router.push("/login"); });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) {

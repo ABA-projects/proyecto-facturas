@@ -33,6 +33,7 @@ type AuthCtx = {
   loadSession: () => Promise<void>;
   setToken: (t: string) => void;
   clearSession: () => void;
+  setSuperadmin: (v: boolean) => void;
 };
 
 const AuthContext = createContext<AuthCtx | null>(null);
@@ -72,6 +73,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   }, []);
 
+  const setSuperadmin = useCallback((v: boolean) => {
+    setUser((prev) => prev ? { ...prev, is_superadmin: v } : prev);
+  }, []);
+
   /**
    * Intenta renovar el access token usando la cookie httpOnly de refresh.
    * Llamado al montar el AppShell.
@@ -105,7 +110,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ token, user, loading, loadSession, setToken, clearSession }}
+      value={{ token, user, loading, loadSession, setToken, clearSession, setSuperadmin }}
     >
       {children}
     </AuthContext.Provider>
