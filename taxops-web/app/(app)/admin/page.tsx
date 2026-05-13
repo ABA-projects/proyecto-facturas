@@ -553,7 +553,7 @@ export default function AdminPage() {
                       <td className="px-4 py-3 text-gray-900 text-xs">{u.email}</td>
                       <td className="px-4 py-3 text-gray-500 text-xs">{u.full_name ?? "—"}</td>
                       <td className="px-4 py-3">
-                        {u.id === user?.user_id || u.role === "owner" && !isOwner ? (
+                        {(u.id === user?.user_id) || (u.role === "owner" && !isOwner) ? (
                           <span className={`badge ${
                             u.role === "owner" ? "bg-violet-50 text-violet-700" :
                             u.role === "admin" ? "bg-blue-50 text-blue-700" :
