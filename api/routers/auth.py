@@ -194,9 +194,12 @@ async def google_callback(code: str, state: str | None = None) -> dict:
             ).mappings().fetchone()
 
             if row is None:
-                # User doesn't exist — redirect to signup instead of auto-creating
                 import urllib.parse
-                signup_url = f"{frontend_base.rstrip('/')}/signup?error=no_account&email={urllib.parse.quote(email)}"
+                signup_url = (
+                    f"{frontend_base.rstrip('/')}/signup/google"
+                    f"?email={urllib.parse.quote(email)}"
+                    f"&name={urllib.parse.quote(full_name)}"
+                )
                 return RedirectResponse(signup_url)
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Error de base de datos") from exc
