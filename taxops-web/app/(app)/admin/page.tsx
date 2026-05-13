@@ -274,6 +274,14 @@ export default function AdminPage() {
     catch (e: unknown) { flash(e instanceof Error ? e.message : "Error", "err"); }
   }
 
+  async function changeUserRole(userId: string, newRole: string) {
+    try {
+      await patch(`/admin/users/${userId}/role`, { role: newRole });
+      setUsers((p) => p.map((u) => u.id === userId ? { ...u, role: newRole } : u));
+      flash(`Rol actualizado a ${newRole}`, "ok");
+    } catch (e: unknown) { flash(e instanceof Error ? e.message : "Error al cambiar rol", "err"); }
+  }
+
   async function hardDeleteUser(u: User) {
     withConfirm(
       `¿Eliminar permanentemente a ${u.email}? Esta acción no se puede deshacer. Se anonimizará el email y se perderá el acceso.`,
@@ -516,8 +524,10 @@ export default function AdminPage() {
               <input className="input" placeholder="Contraseña temporal" type="password" value={newUser.password} onChange={(e) => setNewUser((p) => ({ ...p, password: e.target.value }))} />
               <input className="input" placeholder="Nombre completo (opcional)" value={newUser.full_name} onChange={(e) => setNewUser((p) => ({ ...p, full_name: e.target.value }))} />
               <select className="input" value={newUser.role} onChange={(e) => setNewUser((p) => ({ ...p, role: e.target.value }))}>
+                <option value="auxiliar_contable">Auxiliar Contable</option>
                 <option value="contador">Contador</option>
                 {isOwner && <option value="admin">Admin</option>}
+                {isOwner && <option value="owner">Owner</option>}
               </select>
             </div>
             <button onClick={createUser} className="btn-primary mt-3 flex items-center gap-2"><Plus size={14} /> Crear usuario</button>
@@ -543,7 +553,26 @@ export default function AdminPage() {
                       <td className="px-4 py-3 text-gray-900 text-xs">{u.email}</td>
                       <td className="px-4 py-3 text-gray-500 text-xs">{u.full_name ?? "—"}</td>
                       <td className="px-4 py-3">
-                        <span className={`badge ${u.role === "owner" ? "bg-violet-50 text-violet-700" : u.role === "admin" ? "bg-blue-50 text-blue-700" : "bg-gray-100 text-gray-600"}`}>{u.role}</span>
+                        {u.id === user?.user_id || u.role === "owner" && !isOwner ? (
+                          <span className={`badge ${
+                            u.role === "owner" ? "bg-violet-50 text-violet-700" :
+                            u.role === "admin" ? "bg-blue-50 text-blue-700" :
+                            u.role === "contador" ? "bg-teal-50 text-teal-700" :
+                            "bg-gray-100 text-gray-600"
+                          }`}>{u.role === "auxiliar_contable" ? "Auxiliar" : u.role}</span>
+                        ) : (
+                          <select
+                            className="text-xs border border-gray-200 rounded-lg px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-brand-orange"
+                            value={u.role}
+                            disabled={u.id === user?.user_id}
+                            onChange={(e) => changeUserRole(u.id, e.target.value)}
+                          >
+                            <option value="auxiliar_contable">Auxiliar Contable</option>
+                            <option value="contador">Contador</option>
+                            {isOwner && <option value="admin">Admin</option>}
+                            {isOwner && <option value="owner">Owner</option>}
+                          </select>
+                        )}
                       </td>
                       <td className="px-4 py-3"><span className={`badge ${u.active ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>{u.active ? "Activo" : "Inactivo"}</span></td>
                       <td className="px-4 py-3 text-gray-400 text-xs">{new Date(u.created_at).toLocaleDateString("es-CO")}</td>
@@ -588,6 +617,7 @@ export default function AdminPage() {
                 onChange={(e) => setInviteForm((p) => ({ ...p, email: e.target.value }))}
               />
               <select className="input" value={inviteForm.role} onChange={(e) => setInviteForm((p) => ({ ...p, role: e.target.value }))}>
+                <option value="auxiliar_contable">Auxiliar Contable</option>
                 <option value="contador">Contador</option>
                 {isOwner && <option value="admin">Admin</option>}
               </select>
@@ -763,11 +793,11 @@ export default function AdminPage() {
         </div>
       )}
 
-      {/* ══ SOLICITUDES ADMIN ══════════════════════════════════════════════════ */}
+      {/* ══ SOLICITUDES ════════════════════════════════════════════════════════ */}
       {tab === "solicitudes" && (
         <div className="card p-0 overflow-hidden">
           <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-            <h3 className="font-semibold text-gray-900">Solicitudes de acceso Admin ({requests.length})</h3>
+            <h3 className="font-semibold text-gray-900">Solicitudes de cambio de perfil ({requests.length})</h3>
             <button onClick={loadRequests} className="text-gray-400 hover:text-gray-700"><RefreshCw size={14} /></button>
           </div>
           {requestsLoading ? <div className="p-6 text-sm text-gray-400">Cargando...</div> : requests.length === 0 ? (
@@ -775,22 +805,41 @@ export default function AdminPage() {
           ) : (
             <table className="w-full text-sm">
               <thead><tr className="bg-gray-50 border-b border-gray-100">
-                {["Email","Nombre","Solicitado","Creado","Acción"].map((h) => <th key={h} className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">{h}</th>)}
+                {["Email","Nombre","Rol actual","Solicitado","Asignar rol"].map((h) => <th key={h} className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">{h}</th>)}
               </tr></thead>
               <tbody>
                 {requests.map((r) => (
                   <tr key={r.id} className="border-b border-gray-100 hover:bg-gray-50">
                     <td className="px-6 py-3 text-gray-900">{r.email}</td>
                     <td className="px-6 py-3 text-gray-500">{r.full_name ?? "—"}</td>
+                    <td className="px-6 py-3"><span className="badge bg-gray-100 text-gray-600">{r.role}</span></td>
                     <td className="px-6 py-3 text-gray-400 text-xs">{new Date(r.admin_requested_at).toLocaleString("es-CO")}</td>
-                    <td className="px-6 py-3 text-gray-400 text-xs">{new Date(r.created_at).toLocaleDateString("es-CO")}</td>
                     <td className="px-6 py-3">
-                      <button
-                        onClick={async () => { try { await post(`/admin/users/${r.id}/approve-admin`, {}); flash(`${r.email} promovido a admin`, "ok"); loadRequests(); } catch { flash("Error al aprobar", "err"); } }}
-                        className="flex items-center gap-1 bg-emerald-500 hover:bg-emerald-600 text-white px-3 py-1 rounded-lg text-xs font-medium transition-colors"
-                      >
-                        <Check size={12} /> Aprobar como Admin
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <select
+                          id={`role-select-${r.id}`}
+                          defaultValue="contador"
+                          className="text-xs border border-gray-200 rounded-lg px-2 py-1 bg-white focus:outline-none"
+                        >
+                          <option value="auxiliar_contable">Auxiliar Contable</option>
+                          <option value="contador">Contador</option>
+                          {isOwner && <option value="admin">Admin</option>}
+                        </select>
+                        <button
+                          onClick={async () => {
+                            const sel = document.getElementById(`role-select-${r.id}`) as HTMLSelectElement;
+                            try {
+                              await patch(`/admin/users/${r.id}/role`, { role: sel.value });
+                              flash(`${r.email} → ${sel.value}`, "ok");
+                              loadRequests();
+                              setUsers((p) => p.map((u) => u.id === r.id ? { ...u, role: sel.value } : u));
+                            } catch { flash("Error al cambiar rol", "err"); }
+                          }}
+                          className="flex items-center gap-1 bg-emerald-500 hover:bg-emerald-600 text-white px-3 py-1 rounded-lg text-xs font-medium transition-colors"
+                        >
+                          <Check size={12} /> Aprobar
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

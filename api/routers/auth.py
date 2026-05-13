@@ -368,12 +368,13 @@ async def accept_invite(token: str, body: "AcceptInviteRequest") -> TokenRespons
 
 @router.post("/request-admin")
 async def request_admin(user: dict = Depends(get_current_user)) -> dict:
-    """Contador solicita ser promovido a admin. Marca timestamp en DB."""
+    """Usuario con rol base solicita cambio de perfil. Marca timestamp en DB."""
     from db.database import get_db
     from sqlalchemy import text
+    from schemas import BASE_ROLES
 
-    if user["role"] != "contador":
-        raise HTTPException(status_code=403, detail="Solo los contadores pueden solicitar acceso admin")
+    if user["role"] not in BASE_ROLES:
+        raise HTTPException(status_code=403, detail="Solo usuarios con rol base pueden solicitar cambio de perfil")
 
     try:
         with get_db() as db:

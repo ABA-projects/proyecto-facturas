@@ -60,6 +60,18 @@ class AccessTokenResponse(BaseModel):
     token_type: str = "bearer"
 
 
+# ── Role constants ────────────────────────────────────────────────────────────
+ADMIN_ROLES = ("owner", "admin")
+BASE_ROLES  = ("contador", "auxiliar_contable")
+ALL_ROLES   = ADMIN_ROLES + BASE_ROLES
+
+ROLE_LABELS = {
+    "owner":             "Owner",
+    "admin":             "Admin",
+    "contador":          "Contador",
+    "auxiliar_contable": "Auxiliar Contable",
+}
+
 # ── Users ─────────────────────────────────────────────────────────────────────
 
 class UserResponse(BaseModel):
@@ -87,8 +99,8 @@ class CreateUserRequest(BaseModel):
     @field_validator("role")
     @classmethod
     def validate_role(cls, v: str) -> str:
-        if v not in ("owner", "admin", "contador"):
-            raise ValueError("Rol inválido. Opciones: owner, admin, contador")
+        if v not in ALL_ROLES:
+            raise ValueError(f"Rol inválido. Opciones: {', '.join(ALL_ROLES)}")
         return v
 
 
@@ -96,6 +108,17 @@ class UpdateUserRequest(BaseModel):
     full_name: Optional[str] = None
     role: Optional[str] = None
     active: Optional[bool] = None
+
+
+class ChangeRoleRequest(BaseModel):
+    role: str
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, v: str) -> str:
+        if v not in ALL_ROLES:
+            raise ValueError(f"Rol inválido. Opciones: {', '.join(ALL_ROLES)}")
+        return v
 
 
 # ── Organizations ─────────────────────────────────────────────────────────────
@@ -257,7 +280,7 @@ class SuperadminOrgStats(BaseModel):
 
 class InviteCreate(BaseModel):
     email: str
-    role: str = "contador"
+    role: str = "auxiliar_contable"
 
     @field_validator("email")
     @classmethod
@@ -267,8 +290,8 @@ class InviteCreate(BaseModel):
     @field_validator("role")
     @classmethod
     def validate_role(cls, v: str) -> str:
-        if v not in ("admin", "contador"):
-            raise ValueError("Rol inválido. Opciones: admin, contador")
+        if v not in ("admin", "contador", "auxiliar_contable"):
+            raise ValueError("Rol inválido. Opciones: admin, contador, auxiliar_contable")
         return v
 
 

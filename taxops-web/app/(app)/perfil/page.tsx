@@ -3,7 +3,7 @@
 import { useEffect, useState, FormEvent } from "react";
 import { useAuth } from "@/lib/auth";
 import { useApi } from "@/lib/api";
-import { User, Lock, Building2, Layers, Check, X } from "lucide-react";
+import { User, Lock, Building2, Layers, Check, X, Shield } from "lucide-react";
 
 type OrgInfo  = { id: string; slug: string; name: string; plan: string; nit: string | null };
 type GroupInfo = { id: string; name: string; description: string | null; modules: string[] };
@@ -69,10 +69,29 @@ export default function PerfilPage() {
     finally { setSaving(false); setTimeout(() => setPwOk(""), 3000); }
   }
 
+  const BASE_ROLES = ["contador", "auxiliar_contable"];
+
+  const [upgradeOk, setUpgradeOk]   = useState("");
+  const [upgradeErr, setUpgradeErr] = useState("");
+  const [upgradeLoading, setUpgrL]  = useState(false);
+  const [alreadyRequested, setAlreadyRequested] = useState(false);
+
+  async function requestUpgrade() {
+    setUpgradeOk(""); setUpgradeErr("");
+    setUpgrL(true);
+    try {
+      const res = await fetch("/api-proxy/auth/request-admin", { method: "POST", headers: { Authorization: `Bearer ${sessionStorage.getItem("taxops_token")}` } });
+      if (!res.ok) { const d = await res.json().catch(() => ({})); setUpgradeErr(d.detail ?? "Error"); return; }
+      setUpgradeOk("Solicitud enviada. Un administrador revisará tu solicitud."); setAlreadyRequested(true);
+    } catch { setUpgradeErr("Error de conexión"); }
+    finally { setUpgrL(false); }
+  }
+
   const roleBadge: Record<string, string> = {
-    owner:    "bg-violet-50 text-violet-700",
-    admin:    "bg-blue-50 text-blue-700",
-    contador: "bg-gray-100 text-gray-600",
+    owner:             "bg-violet-50 text-violet-700",
+    admin:             "bg-blue-50 text-blue-700",
+    contador:          "bg-teal-50 text-teal-700",
+    auxiliar_contable: "bg-gray-100 text-gray-600",
   };
 
   const planBadge: Record<string, string> = {
@@ -198,6 +217,31 @@ export default function PerfilPage() {
             {org.nit && <div><dt className="text-xs text-gray-400 mb-0.5">NIT</dt><dd className="font-medium text-gray-900">{org.nit}</dd></div>}
             <div><dt className="text-xs text-gray-400 mb-0.5">Plan</dt><dd><span className={`badge capitalize ${planBadge[org.plan] ?? "bg-gray-100"}`}>{org.plan}</span></dd></div>
           </dl>
+        </div>
+      )}
+
+      {/* Solicitar cambio de perfil — solo para roles base */}
+      {user && BASE_ROLES.includes(user.role) && (
+        <div className="card border border-amber-100">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="p-2.5 bg-amber-50 rounded-xl"><Shield size={20} className="text-amber-600" /></div>
+            <div>
+              <h2 className="font-semibold text-gray-900">Solicitar cambio de perfil</h2>
+              <p className="text-xs text-gray-500">Pide a un administrador que te asigne un perfil diferente</p>
+            </div>
+          </div>
+          <Flash ok={upgradeOk} err={upgradeErr} />
+          {!alreadyRequested ? (
+            <button
+              onClick={requestUpgrade}
+              disabled={upgradeLoading}
+              className="btn-primary mt-2"
+            >
+              {upgradeLoading ? "Enviando..." : "Solicitar cambio de perfil"}
+            </button>
+          ) : (
+            <p className="text-sm text-amber-700 bg-amber-50 rounded-xl p-3 mt-2">Solicitud enviada — un administrador la revisará pronto.</p>
+          )}
         </div>
       )}
 

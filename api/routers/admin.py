@@ -354,13 +354,15 @@ async def reactivate_user(
 
 @router.get("/users/admin-requests")
 async def list_admin_requests(admin: dict = Depends(require_admin)) -> list[dict]:
+    from schemas import BASE_ROLES
     get_db = _get_db()
+    placeholders = ", ".join(f"'{r}'" for r in BASE_ROLES)
     with get_db() as db:
         rows = db.execute(
-            text("""
-                SELECT id, email, full_name, admin_requested_at, created_at
+            text(f"""
+                SELECT id, email, full_name, role, admin_requested_at, created_at
                 FROM users
-                WHERE org_id = :o AND role = 'contador'
+                WHERE org_id = :o AND role IN ({placeholders})
                   AND admin_requested_at IS NOT NULL
                   AND active = TRUE AND deleted_at IS NULL
                 ORDER BY admin_requested_at ASC
@@ -370,28 +372,40 @@ async def list_admin_requests(admin: dict = Depends(require_admin)) -> list[dict
     return [dict(r) for r in rows]
 
 
-@router.post("/users/{user_id}/approve-admin")
-async def approve_admin(
+@router.patch("/users/{user_id}/role")
+async def change_user_role(
     user_id: str,
+    body: "ChangeRoleRequest",
     admin: dict = Depends(require_admin),
 ) -> dict:
+    """Cambia el rol de un usuario. Owner puede asignar cualquier rol; admin solo roles base."""
+    from schemas import ADMIN_ROLES, BASE_ROLES, ChangeRoleRequest  # noqa: F401
+    caller_role = admin["role"]
+
+    if body.role in ADMIN_ROLES and caller_role != "owner":
+        raise HTTPException(status_code=403, detail="Solo el owner puede asignar roles admin u owner")
+
     get_db = _get_db()
     with get_db() as db:
-        result = db.execute(
-            text("""
-                UPDATE users
-                SET role = 'admin', admin_requested_at = NULL
-                WHERE id = :id AND org_id = :o AND role = 'contador' AND deleted_at IS NULL
-                RETURNING id
-            """),
+        target = db.execute(
+            text("SELECT id, role FROM users WHERE id = :id AND org_id = :o AND deleted_at IS NULL"),
             {"id": user_id, "o": admin["org_id"]},
-        ).fetchone()
-    if result is None:
-        raise HTTPException(status_code=404, detail="Usuario no encontrado o ya es admin")
-    with _get_db()() as db:
-        _log(db, org_id=admin["org_id"], user=admin, action="promote_to_admin",
-             resource_type="user", resource_id=user_id)
-    return {"message": "Usuario promovido a admin"}
+        ).mappings().fetchone()
+        if not target:
+            raise HTTPException(status_code=404, detail="Usuario no encontrado")
+        if target["role"] == "owner" and caller_role != "owner":
+            raise HTTPException(status_code=403, detail="No se puede modificar el rol de un owner")
+        if str(target["id"]) == admin["user_id"]:
+            raise HTTPException(status_code=400, detail="No puedes cambiar tu propio rol")
+
+        db.execute(
+            text("UPDATE users SET role = :r, admin_requested_at = NULL WHERE id = :id AND org_id = :o"),
+            {"r": body.role, "id": user_id, "o": admin["org_id"]},
+        )
+        _log(db, org_id=admin["org_id"], user=admin, action="change_role",
+             resource_type="user", resource_id=user_id,
+             details={"from": target["role"], "to": body.role})
+    return {"message": f"Rol actualizado a {body.role}"}
 
 
 # ── Groups ────────────────────────────────────────────────────────────────────
