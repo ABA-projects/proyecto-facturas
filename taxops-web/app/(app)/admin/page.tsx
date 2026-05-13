@@ -12,7 +12,7 @@ import { useAuth } from "@/lib/auth";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type User         = { id: string; email: string; full_name: string | null; role: string; active: boolean; created_at: string };
-type AdminRequest = { id: string; email: string; full_name: string | null; admin_requested_at: string; created_at: string };
+type AdminRequest = { id: string; email: string; full_name: string | null; role: string; admin_requested_at: string; created_at: string };
 type Client       = { id: string; nit: string; razon_social: string; active: boolean; created_at?: string };
 type Session      = { id: string; total_archivos: number; procesados: number; errores: number; nuevas: number; duplicadas: number; status: string; started_at: string; finished_at: string | null; user_email: string | null };
 type Autorreten   = { id: number; nit: string; razon_social: string | null; vigente: boolean; updated_at: string };
