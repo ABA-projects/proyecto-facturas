@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Sidebar from "@/components/layout/sidebar";
 import Header from "@/components/layout/header";
 import { AuthProvider, useAuth } from "@/lib/auth";
+import { useApi } from "@/lib/api";
 
 const API_URL = "/api-proxy";
 
@@ -32,7 +33,7 @@ function AdminRequestBanner() {
   return (
     <div className="bg-amber-50 border-b border-amber-200 px-6 py-2 flex items-center justify-between text-sm">
       <span className="text-amber-800">
-        Tu cuenta tiene rol <strong>contador</strong>. ¿Necesitas acceso de administrador?
+        Tu cuenta tiene rol <strong>{user.role}</strong>. ¿Necesitas acceso de administrador?
       </span>
       {status === "idle" && (
         <button
@@ -51,16 +52,15 @@ function AdminRequestBanner() {
 
 function AppShell({ children }: { children: React.ReactNode }) {
   const { token, loadSession, loading, setSuperadmin } = useAuth();
+  const { get } = useApi();
   const router = useRouter();
 
   useEffect(() => {
     loadSession()
       .then(() => {
         // Chequeo superadmin en tiempo real — independiente del JWT
-        const t = sessionStorage.getItem("taxops_token");
-        if (!t) return;
-        fetch(`${API_URL}/admin/superadmin/check`, { headers: { Authorization: `Bearer ${t}` } })
-          .then((r) => { if (r.ok) setSuperadmin(true); })
+        get<{ is_superadmin: boolean }>("/admin/superadmin/check")
+          .then((data) => { if (data.is_superadmin) setSuperadmin(true); })
           .catch(() => {});
       })
       .catch(() => { router.push("/login"); });

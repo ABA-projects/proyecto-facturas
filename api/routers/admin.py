@@ -685,9 +685,11 @@ async def create_client(
 # ── Superadmin ────────────────────────────────────────────────────────────────
 
 @router.get("/superadmin/check")
-async def superadmin_check(_: dict = Depends(require_superadmin)) -> dict:
-    """Verifica si el usuario actual es superadmin. 200 = sí, 403 = no."""
-    return {"is_superadmin": True}
+async def superadmin_check(user: dict = Depends(get_current_user)) -> dict:
+    """Retorna is_superadmin para cualquier usuario autenticado (nunca 403)."""
+    s = get_settings()
+    allowed = {e.strip().lower() for e in s.TAXOPS_SUPERADMIN_EMAILS.split(",") if e.strip()}
+    return {"is_superadmin": user["email"].lower() in allowed}
 
 
 @router.get("/superadmin/orgs", response_model=list[SuperadminOrgStats])
