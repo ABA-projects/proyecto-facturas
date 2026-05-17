@@ -18,12 +18,27 @@ async def process_exogenas(
     files: list[UploadFile] = File(...),
     user: dict = Depends(get_current_user),
 ) -> ProcessExogenasResponse:
+    _ALLOWED = {
+        ".pdf", ".docx", ".doc",
+        ".xlsx", ".xls",
+        ".jpg", ".jpeg", ".png", ".tiff", ".tif", ".bmp", ".webp",
+    }
+
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_paths: list[Path] = []
         for upload in files:
             safe_name = Path(upload.filename or "archivo").name
+            if Path(safe_name).suffix.lower() not in _ALLOWED:
+                raise HTTPException(
+                    status_code=415,
+                    detail=f"Formato no soportado: {safe_name}. "
+                           "Soportados: PDF, DOCX, XLSX, JPG, PNG.",
+                )
             dest = Path(tmpdir) / safe_name
-            dest.write_bytes(await upload.read())
+            # Escribir en chunks de 256 KB — no carga el archivo completo en RAM
+            with dest.open("wb") as fout:
+                while chunk := await upload.read(256 * 1024):
+                    fout.write(chunk)
             tmp_paths.append(dest)
 
         try:

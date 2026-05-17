@@ -583,29 +583,79 @@ def _base_row(path: Path, error: str = "") -> dict:
     }
 
 
+_MAX_PAGES = 10  # Certificados de retención no superan 10 páginas
+
+
+def _read_pdf(path: Path) -> tuple[str, bool]:
+    """Lee PDF limitando a _MAX_PAGES para no saturar RAM en Railway."""
+    parts: list[str] = []
+    with pdfplumber.open(path) as pdf:
+        for page in pdf.pages[:_MAX_PAGES]:
+            t = page.extract_text()
+            if t:
+                parts.append(t)
+    text = "\n".join(parts)
+    return text, not text.strip()
+
+
+def _read_docx(path: Path) -> tuple[str, bool]:
+    from docx import Document
+    doc = Document(str(path))
+    parts: list[str] = []
+    for para in doc.paragraphs:
+        if para.text.strip():
+            parts.append(para.text)
+    for table in doc.tables:
+        for row in table.rows:
+            parts.append("\t".join(cell.text for cell in row.cells))
+    return "\n".join(parts), False
+
+
+def _read_excel(path: Path) -> tuple[str, bool]:
+    """Convierte celdas de Excel a texto plano para extracción de campos."""
+    import openpyxl
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    parts: list[str] = []
+    for ws in wb.worksheets:
+        for row in ws.iter_rows(values_only=True):
+            row_txt = "\t".join(str(c) if c is not None else "" for c in row)
+            if row_txt.strip():
+                parts.append(row_txt)
+    wb.close()
+    return "\n".join(parts), False
+
+
+def _read_image(path: Path) -> tuple[str, bool]:
+    """OCR sobre imagen (JPG/PNG/TIFF) con pytesseract — requiere Tesseract en el sistema."""
+    try:
+        from PIL import Image
+        import pytesseract
+    except ImportError:
+        return "", True  # sin pytesseract → tratar como escaneado
+
+    img = Image.open(path)
+    # Escala 2× para mejorar precisión en documentos pequeños
+    w, h = img.size
+    img = img.resize((w * 2, h * 2), Image.LANCZOS)
+    text = pytesseract.image_to_string(img, lang="spa")
+    img.close()
+    return text, not text.strip()
+
+
 def _read_text(path: Path) -> tuple[str, bool]:
     """
-    Lee el texto del PDF. Retorna (texto, es_escaneado).
-    es_escaneado=True si el PDF no tiene texto extraíble.
+    Dispatcher multi-formato. Retorna (texto, es_escaneado).
+    Soporta: PDF, DOCX/DOC, XLSX/XLS, JPG/PNG/TIFF/BMP/WEBP.
     """
     suf = path.suffix.lower()
     if suf in (".docx", ".doc"):
-        from docx import Document
-        doc = Document(str(path))
-        parts = []
-        for para in doc.paragraphs:
-            if para.text.strip():
-                parts.append(para.text)
-        for table in doc.tables:
-            for row in table.rows:
-                parts.append("\t".join(cell.text for cell in row.cells))
-        return "\n".join(parts), False
-
-    with pdfplumber.open(path) as pdf:
-        pages_text = [page.extract_text() or "" for page in pdf.pages]
-    text = "\n".join(pages_text)
-    es_escaneado = not text.strip()
-    return text, es_escaneado
+        return _read_docx(path)
+    if suf in (".xlsx", ".xls"):
+        return _read_excel(path)
+    if suf in (".jpg", ".jpeg", ".png", ".tiff", ".tif", ".bmp", ".webp"):
+        return _read_image(path)
+    # Default: PDF
+    return _read_pdf(path)
 
 
 def extract_many(path: "str | Path") -> list[dict]:
@@ -638,6 +688,15 @@ def extract_many(path: "str | Path") -> list[dict]:
     ciudad                = _extract_ciudad_retencion(text)
     direccion             = _extract_direccion(text)
 
+    suf = path.suffix.lower()
+    _fuente_map = {
+        ".pdf": "PDF", ".docx": "DOCX", ".doc": "DOC",
+        ".xlsx": "EXCEL", ".xls": "EXCEL",
+        ".jpg": "IMAGEN", ".jpeg": "IMAGEN", ".png": "IMAGEN",
+        ".tiff": "IMAGEN", ".tif": "IMAGEN", ".bmp": "IMAGEN", ".webp": "IMAGEN",
+    }
+    fuente = _fuente_map.get(suf, "PDF")
+
     def _make_row(concepto: str, porcentaje: float, b: float, r: float) -> dict:
         tasa_calc = round(r / b * 100, 2) if b else 0.0
         return {
@@ -654,7 +713,7 @@ def extract_many(path: "str | Path") -> list[dict]:
             "validacion_tasa":  tasa_calc,
             "es_escaneado":     False,
             "tipo_cert":        tipo_cert,
-            "fuente":           "PDF",
+            "fuente":           fuente,
             "archivo":          path.name,
             "error":            "",
         }

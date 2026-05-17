@@ -69,7 +69,7 @@ def _resolver_archivos(carpeta: Path) -> list[Path]:
     return sorted(candidatos.values())
 
 
-def procesar(carpeta: Path, ingresos_raw: str = "", workers: int = 4) -> Path:
+def procesar(carpeta: Path, ingresos_raw: str = "", workers: int = 2) -> Path:
     archivos = _resolver_archivos(carpeta)
     total = len(archivos)
     if not total:
@@ -81,20 +81,23 @@ def procesar(carpeta: Path, ingresos_raw: str = "", workers: int = 4) -> Path:
     filas: list[dict] = []
     errores_extraccion = 0
 
-    with ThreadPoolExecutor(max_workers=workers) as executor:
-        futures = {executor.submit(extract_one, p): p for p in archivos}
-        done = 0
-        for future in as_completed(futures):
-            done += 1
-            row = future.result()
-            if row:
-                filas.append(row)
-            else:
-                errores_extraccion += 1
-            # Progreso en stdout cada 50 archivos o al terminar
-            if done % 50 == 0 or done == total:
-                pct = 100 * done // total
-                print(f"  {done}/{total} ({pct}%) — {errores_extraccion} errores", flush=True)
+    # Submitimos en lotes de 20 para no acumular todos los futures en RAM
+    BATCH = 20
+    done = 0
+    for batch_start in range(0, total, BATCH):
+        lote = archivos[batch_start:batch_start + BATCH]
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {executor.submit(extract_one, p): p for p in lote}
+            for future in as_completed(futures):
+                done += 1
+                row = future.result()
+                if row:
+                    filas.append(row)
+                else:
+                    errores_extraccion += 1
+                if done % 50 == 0 or done == total:
+                    pct = 100 * done // total
+                    print(f"  {done}/{total} ({pct}%) — {errores_extraccion} errores", flush=True)
 
     if not filas:
         logger.error("No se extrajeron datos.")
@@ -141,8 +144,8 @@ def main():
     parser.add_argument("--ingresos", default="")
     parser.add_argument(
         "--workers", type=int,
-        default=min(8, (os.cpu_count() or 4)),
-        help="Hilos paralelos para extraccion (default: min(8, CPUs))",
+        default=2,
+        help="Hilos paralelos para extraccion (default: 2 — limitado por RAM, no por CPU)",
     )
     args = parser.parse_args()
 
