@@ -105,6 +105,8 @@ _CIUDAD_BLACKLIST = frozenset({
     "expedicion", "expedición", "consignacion", "consignación",
     "enero", "febrero", "marzo", "abril", "mayo", "junio",
     "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+    "año", "practicó", "practico", "practica", "siguiente", "siguientes",
+    "valores", "empresa", "señores", "estimados", "retenido",
 })
 
 # Ciudad donde se practicó la retención (acepta variantes con/sin acento)
@@ -130,7 +132,7 @@ _RE_CIUDAD_LUGAR = re.compile(
     r"(?:lugar\s+de\s+expedi[cs]i[oó]n|expedido\s+en)\s*[:\-]?\s*([A-ZÁÉÍÓÚÑ][^\n,]{2,25})", re.I
 )
 _RE_CIUDAD_FECHA = re.compile(
-    r"^([A-ZÁÉÍÓÚÑ]{3,}(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)*),?\s+\d{1,2}[\s/]\w{2,10}[\s/]\d{4}",
+    r"^([A-ZÁÉÍÓÚÑ]{3,}(?:\s+[A-ZÁÉÍÓÚÑ]{2,})*),?\s+\d{1,2}[\s/]\w{2,10}[\s/]\d{4}",
     re.M,
 )
 
@@ -263,6 +265,14 @@ _RE_SAP_TOTAL = re.compile(
 
 # ── NIT y Razón Social ────────────────────────────────────────────────────────
 
+# Patrones de texto que NO son razón social
+_RE_RAZON_INVALID = re.compile(
+    r"^(?:fecha\s+de\s+expedic|año\s+gravable|periodo\s+gravable"
+    r"|certificado\s+de\s+retenci|periodo\s+de\s+retenci)",
+    re.I,
+)
+
+
 def _clean_nit(raw: str) -> str:
     """Elimina puntos, comas y guiones de un NIT: '800.233.836' → '800233836'."""
     return re.sub(r"\D", "", raw)
@@ -303,8 +313,18 @@ def _extract_emisor(text: str) -> tuple[str, str, str]:
     def _make_result(razon: str, nit_raw: str, dv_raw: str) -> tuple[str, str, str]:
         nit = _clean_nit(nit_raw)
         d = dv_raw if dv_raw else (calcular_dv(nit) if nit else "")
+        # Strip label prefixes (Retenedor:, Señores:, RETENIDO:, etc.)
+        razon = re.sub(
+            r"(?i)^(?:retenedor|retenido|señores?|señor|estimados?)\s*:\s*",
+            "", razon,
+        ).strip()
         razon = re.sub(r"(?i)(agente\s+retenedor|razón?\s+social|nombre\s+comercial|empresa)[:\s]*", "", razon).strip()
         razon = re.sub(r"[\|_\-]{2,}", "", razon).strip()
+        # Strip leading NIT prefix (e.g. "901996294-SIEMPRE NIÑAS")
+        razon = re.sub(r"^\d{6,12}[-–]\s*", "", razon).strip()
+        # Discard header lines that are not a company name
+        if _RE_RAZON_INVALID.search(razon):
+            razon = ""
         return (razon if len(razon) >= 3 else ""), nit, d
 
     # ── PRIORIDAD 1: SAP bilingüe "Company Code Tax No." (EL BUCANERO) ─────────
@@ -423,7 +443,7 @@ def _extract_emisor(text: str) -> tuple[str, str, str]:
 
 def _extract_direccion(text: str) -> str:
     m = re.search(
-        r"(?:CL|CR|CRA|AK|AV|KM|VDA|CARRERA|CALLE|DIAGONAL|TRANSVERSAL|AVENIDA)[^\n]{3,70}",
+        r"(?:(?<!\w)(?:CLL?|CRA?|KR|AK|AV|KM|VDA)(?!\w)|CARRERA|CALLE|DIAGONAL|TRANSVERSAL|AVENIDA)[^\n]{3,70}",
         text, re.I,
     )
     if not m:
@@ -775,6 +795,11 @@ _CIUDAD_OCR_FIXES = {
     "BOGOT": "BOGOTÁ", "BARRANQUILA": "BARRANQUILLA",
 }
 
+_TRAILING_NOISE = frozenset({
+    "de", "la", "el", "los", "las", "del", "en", "al", "a", "y", "o", "un", "una",
+    "por", "con", "para", "que", "se",
+})
+
 def _clean_city(raw: str) -> str:
     """Limpia ciudad: quita prefijos de ruido, valida contra blacklist."""
     city = raw.split("\n")[0].strip()
@@ -785,18 +810,29 @@ def _clean_city(raw: str) -> str:
         "", city,
     ).strip()
     city = re.sub(r"[\._\|\-]{2,}.*$", "", city).strip()
+    city = re.sub(r"\s*[–—]\s*.*$", "", city).strip()  # em/en dash y lo que sigue
+    # Strip trailing articles/prepositions and blacklisted words
+    words = city.split()
+    while words and (
+        words[-1].lower().rstrip(".,:;") in _CIUDAD_BLACKLIST
+        or words[-1].lower().rstrip(".,:;") in _TRAILING_NOISE
+    ):
+        words.pop()
+    city = " ".join(words)
     # Máximo 3 palabras
     words = city.split()
     city = " ".join(words[:3]) if len(words) > 3 else city
     # Correcciones OCR comunes
     city_up = city.upper().strip()
     city = _CIUDAD_OCR_FIXES.get(city_up, city)
-    # Validar: no es una palabra de la blacklist
-    if city.lower().strip() in _CIUDAD_BLACKLIST:
+    # Debe comenzar con letra mayúscula
+    if city and city[0].islower():
         return ""
-    if all(w.lower() in _CIUDAD_BLACKLIST for w in city.split() if w):
+    # Descartar si alguna palabra significativa (>3 chars) es del blacklist
+    content_words = [w.lower().rstrip(".,:;") for w in city.split() if len(w) > 3]
+    if content_words and any(w in _CIUDAD_BLACKLIST for w in content_words):
         return ""
-    return city
+    return city if len(city) >= 3 else ""
 
 
 def _extract_ciudad_retencion(text: str) -> str:
@@ -837,6 +873,13 @@ def _extract_ciudad_retencion(text: str) -> str:
             return city
 
     return ""
+
+
+def _fix_pct_as_amount(b: float, r: float) -> float:
+    """Si r parece un porcentaje en lugar de valor monetario (ej. 2.5 en vez de 28.928), recalcula."""
+    if b > 10_000 and 0 < r <= 30 and r / b < 0.001:
+        return round(b * r / 100, 2)
+    return r
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
@@ -905,7 +948,22 @@ def _read_docx(path: Path) -> tuple[str, bool]:
 
 
 def _read_excel(path: Path) -> tuple[str, bool]:
-    """Convierte celdas de Excel a texto plano para extracción de campos."""
+    """Convierte celdas de Excel a texto plano. Soporta .xlsx (openpyxl) y .xls (xlrd)."""
+    if path.suffix.lower() == ".xls":
+        try:
+            import xlrd
+            wb = xlrd.open_workbook(str(path))
+            parts: list[str] = []
+            for ws in wb.sheets():
+                for row_idx in range(ws.nrows):
+                    row_txt = "\t".join(
+                        str(ws.cell_value(row_idx, col)) for col in range(ws.ncols)
+                    )
+                    if row_txt.strip():
+                        parts.append(row_txt)
+            return "\n".join(parts), False
+        except ImportError:
+            raise RuntimeError("xlrd no instalado. Ejecuta: pip install xlrd")
     import openpyxl
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
     parts: list[str] = []
@@ -1024,16 +1082,18 @@ def extract_many(path: "str | Path") -> list[dict]:
     # ICA → fila única (va a tabla separada)
     if tipo_cert == "ICA":
         b, r = _extract_amounts(text, tipo_cert, nit_hint=nit)
+        r = _fix_pct_as_amount(b, r)
         return [_make_row("ICA", 0.0, b, r)]
 
     # Intentar múltiples filas de concepto
     multi = _extract_concepto_rows(text, tipo_cert)
     if multi:
-        return [_make_row(concepto, pct, b, r) for concepto, pct, b, r in multi]
+        return [_make_row(concepto, pct, b, _fix_pct_as_amount(b, r)) for concepto, pct, b, r in multi]
 
     # Fallback: fila única
     concepto, porcentaje = _detect_concepto(text, tipo_cert)
     b, r                 = _extract_amounts(text, tipo_cert, nit_hint=nit)
+    r = _fix_pct_as_amount(b, r)
     if b == 0 and r == 0:
         base["error"] = "No se encontraron montos"
         base.update({"razon_social": razon if tipo_doc == "31" else "",
