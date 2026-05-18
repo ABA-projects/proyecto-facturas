@@ -71,7 +71,17 @@ TaxOps procesa facturas electrónicas DIAN (PDF/XML) colombianas en un pipeline:
 
 - **`facturas/autorretenedores.txt`** — 3.287 NITs DIAN (corte 25/02/2026). Cargado al inicio de `facturas/extractor.py`. Para actualizar: reemplazar por nuevo archivo NIT-por-línea. En producción se carga desde tabla `autorretenedores` de PostgreSQL.
 
-- **`static/favicon.svg`** — Favicon inline SVG con logo TaxOps (Tax naranja + Ops azul marino).
+- **`taxops-web/app/icon.svg`** — Favicon Next.js App Router (auto-detected). Logo TaxOps Tax naranja + Ops azul marino.
+
+- **`exogenas/extractor.py`** (~1090 líneas) — Extractor de certificados de retención. Entry points: `extract_many(path)` → `list[dict]`, `extract_one(path)` → `dict`. Soporta PDF (pdfplumber + pytesseract para escaneados), imágenes (pytesseract 2×), Excel (.xlsx openpyxl / .xls xlrd), Word (.docx). Layouts soportados: Bodega de Moda standard, Tennis narrativo, RETE IVA bimestral, RTE ICA 4-col, SAP bilingüe (EL BUCANERO), Mekano ERP (ENTREAGUAS), MEDIFE/IRCC, PUBLIK MAGIC paréntesis, Narrativo base, MAYORISTA, SAN JUAN DE DIOS, QUIRUSTETIC, Multi-concepto tabla.
+  - `_extract_direccion`: usa word boundaries `(?<!\w)AV(?!\w)` para no capturar "GRAVABLE", "AVABLE", "CLARANTES", nombres de empresa.
+  - `_clean_city`: strip trailing artículos+blacklist, em-dash, requiere inicial mayúscula, any-significant-word check; `_TRAILING_NOISE` frozenset para artículos.
+  - `_make_result`: strip prefijos "Retenedor:", "Señores:", "RETENIDO:", NIT prefix, headers inválidos "AÑO GRAVABLE"/"FECHA DE EXPEDICION".
+  - `_fix_pct_as_amount(b, r)`: corrige retención=2.5 (porcentaje) → monto real (`b × r/100`) cuando `b > 10_000 and r ≤ 30 and r/b < 0.001`.
+
+- **`api/routers/calendario.py`** — CRUD del calendario tributario DIAN. Lee/escribe `api/data/calendario_2026.json`. Actualizable sin redeploy vía PUT superadmin.
+
+- **`api/data/calendario_2026.json`** — 31 eventos DIAN 2026 (fuente de verdad). Formato: `{id, fecha, titulo, descripcion, tipo, urgencia, articulo, alertaDias}`. Para actualizar año a año: PUT `/calendario/eventos` con el JSON del nuevo año.
 
 ### Data flow
 
@@ -134,6 +144,10 @@ autorretenedores (reemplaza autorretenedores.txt en producción)
 | POST | `/admin/users/{id}/reactivate` | require_admin | Reactiva usuario inactivo |
 | GET/POST | `/admin/groups` | require_admin/owner | CRUD de grupos |
 | GET | `/admin/audit-logs` | require_admin | Logs con filtros module/action/email |
+| GET | `/calendario/eventos` | get_current_user | Lista eventos DIAN del año en curso |
+| PUT | `/calendario/eventos` | require_superadmin | Reemplaza todos los eventos (nuevo año) |
+| POST | `/calendario/eventos` | require_superadmin | Agrega un evento individual |
+| DELETE | `/calendario/eventos/{id}` | require_superadmin | Elimina un evento por ID |
 
 Guards: `get_current_user` → `require_admin` (owner+admin) → `require_owner` (solo owner) → `require_superadmin` (emails en TAXOPS_SUPERADMIN_EMAILS)
 
@@ -174,3 +188,13 @@ tests/
 - **Rate limiting**: sin throttling por organización
 - **Invitaciones por email**: hoy solo el owner puede crear usuarios directamente
 - **Permisos por grupo**: grupos tienen `modules[]` pero el frontend no bloquea rutas por grupo todavía
+
+### Bugs pendientes — extractor exógenas (próxima sesión)
+
+1. **`RETE FTE 2025 MA TERESA MARTINEZ.jpeg`** → "No se encontraron montos" — OCR imagen baja calidad; considerar preprocesamiento (binarización/contraste).
+2. **`RTE FTE 2025 CAROLINA ARISTIZBAL.pdf`** → "No se encontraron montos" — formato minimalista no reconocido; extraer texto y revisar.
+3. **IND FANTASIA ICA** → base=251231, ret=2025 — fecha "25.12.31" parseada como base; año "2025" como retención. Fix: en ICA fallback, aplicar `0.003 < r/b < 0.02` y descartar números < 1000.
+4. **LEAM SAS** → retención=2500 — `_RE_TOTAL_LINE` captura "2.500" (podría ser % no monto). Fix: validar `r/b > 0.001` antes de retornar.
+5. **EL BUCANERO RTE IVA** → razón social vacía — SAP bilingüe para IVA tiene layout diferente al de renta.
+6. **COMERTEX** → razón social="GIRON", nit=3144113024 — NIT 10 dígitos clasificado como tipo_doc=31; podría ser cédula (13). Fix: verificar si hay "NIT:" o "Cédula:" en el texto.
+7. **Script auto-update calendario**: Parsear PDF DIAN anual y generar `calendario_YYYY.json` automáticamente.

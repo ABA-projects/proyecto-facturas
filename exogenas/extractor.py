@@ -138,7 +138,7 @@ _RE_CIUDAD_FECHA = re.compile(
 
 # Línea TOTAL / TOTALES con dos montos
 _RE_TOTAL_LINE = re.compile(
-    r"^TOTAL(?:ES|S)?\s+([\d.,]+)\s+([\d.,]+)",
+    r"^TOTAL(?:ES|S)?\s*(?:[A-Za-záéíóúñ\s]{0,25}?)\s*[:\-]?\s*[\-\$\s]*([\d.,]+)\s+[\-\$\s]*([\d.,]+)",
     re.M | re.I,
 )
 
@@ -240,7 +240,7 @@ _RE_SAP_COMPANY_NIT = re.compile(r"Company\s+Code\s+Tax\s+No\.?\s+([0-9]{7,12})"
 _RE_SAP_COMPANY_NAME = re.compile(r"Razon\s+social\s+quien[^\n]*\n([^\n]+)", re.I)
 # "Razón Social del Agente Retenedor ... Nit o C.C." seguido en línea siguiente del dato
 _RE_AGENTE_RETENEDOR_HEADER = re.compile(
-    r"Raz[oó]n\s+Social\s+del\s+Agente\s+Retenedor[^\n]*\n([^\n]+)", re.I
+    r"Raz[oó]n\s+[Ss]ocial[^\n]{0,60}?[Aa]gente\s+[Rr]etenedor[^\n]*\n([^\n]+)", re.I
 )
 # Párrafo narrativo: "suma de $RET ... base de $BASE" — [^$] permite saltos de línea
 _RE_NARRATIVO_BASE = re.compile(
@@ -278,7 +278,7 @@ def _clean_nit(raw: str) -> str:
     return re.sub(r"\D", "", raw)
 
 
-_RE_BARE_NIT_DV  = re.compile(r"^(\d{7,12})[-–](\d)$")
+_RE_BARE_NIT_DV  = re.compile(r"^(\d{7,12})\s*[-–]\s*(\d)$")
 _RE_BARE_NIT     = re.compile(r"^(\d{7,12})[-–]?$")   # acepta trailing dash (890905154-)
 _RE_RAZON_LABEL  = re.compile(r"razón?\s+social[^:]{0,20}:\s*([^\n]{3,70})", re.I)
 # Líneas de paginación a ignorar al buscar razón social
@@ -291,7 +291,7 @@ _RE_ADDR_START   = re.compile(
 
 
 def _is_junk_line(ln: str) -> bool:
-    """Retorna True si la línea es paginación, dirección o demasiado corta para ser razón social."""
+    """Retorna True si la línea es paginación, dirección, teléfono o demasiado corta para ser razón social."""
     if not ln or len(ln) < 3:
         return True
     if _RE_PAGINA.match(ln):
@@ -300,6 +300,12 @@ def _is_junk_line(ln: str) -> bool:
         return True
     # Línea que es sólo caracteres de guión/relleno
     if re.match(r"^[-=_*·.]{4,}$", ln):
+        return True
+    # Línea de solo dígitos (teléfono, código, etc.) — no es una razón social
+    if re.match(r"^[\d\s\-+().]{6,}$", ln) and re.search(r"\d{6,}", ln):
+        return True
+    # Líneas de título de documento (no son nombres de empresa)
+    if re.match(r"^(?:certificado|periodo\s+gravable|a[ñn]o\s+gravable|fecha\s+de\s+expedi|constancia\s+de|datos\s+del|certifica\s+que)", ln, re.I):
         return True
     return False
 
@@ -327,16 +333,21 @@ def _extract_emisor(text: str) -> tuple[str, str, str]:
             razon = ""
         return (razon if len(razon) >= 3 else ""), nit, d
 
-    # ── PRIORIDAD 1: SAP bilingüe "Company Code Tax No." (EL BUCANERO) ─────────
-    # El NIT aparece al FINAL de la línea siguiente a "Company Code Tax No."
-    m = re.search(r"Company\s+Code\s+Tax\s+No\.?[^\n]*\n([^\n]+)", text, re.I)
-    if m:
-        next_line = m.group(1).strip()
-        nit_m = re.search(r"(\d{7,12})\s*$", next_line)
-        if nit_m:
-            nit_raw = nit_m.group(1)
-            razon = next_line[:nit_m.start()].strip()
-            return _make_result(razon, nit_raw, "")
+    # ── PRIORIDAD 1: SAP bilingüe (varias variantes de etiqueta) (EL BUCANERO) ──
+    # El NIT aparece al FINAL de la línea siguiente al header de retenedor
+    for _sap_pat in (
+        r"Company\s+Code\s+Tax\s+No\.?[^\n]*\n([^\n]+)",
+        r"Company\s+Code\s+Name\s+NIT[^\n]*\n([^\n]+)",
+    ):
+        m = re.search(_sap_pat, text, re.I)
+        if m:
+            next_line = m.group(1).strip()
+            nit_m = re.search(r"(\d{7,12})\s*$", next_line)
+            if nit_m:
+                nit_raw = nit_m.group(1)
+                razon = next_line[:nit_m.start()].strip()
+                return _make_result(razon, nit_raw, "")
+            break
 
     # ── PRIORIDAD 2: "Razón Social del Agente Retenedor" sección (MEDIFE) ──────
     m = _RE_AGENTE_RETENEDOR_HEADER.search(text)
@@ -366,6 +377,18 @@ def _extract_emisor(text: str) -> tuple[str, str, str]:
             nit_raw = nm.group(1)
             dv = nm.group(2) if nm.lastindex and nm.lastindex >= 2 else ""
             return _make_result(razon, nit_raw, dv)
+
+    # ── PRIORIDAD 4b: tabla SAP "Nombre EMPRESA Nit: NNN - D" en una sola línea ──
+    m = re.search(
+        r"[Nn]ombre\s+([A-ZÁÉÍÓÚÑ&][^\n]{3,60}?)\s+[Nn]it[:\s]+([0-9]{1,3}(?:[.,][0-9]{3})+|[0-9]{7,12})\s*[-–]\s*([0-9])",
+        text, re.I,
+    )
+    if m:
+        razon_cand = m.group(1).strip()
+        nit_cand   = re.sub(r"[.,]", "", m.group(2))
+        dv_cand    = m.group(3)
+        if len(nit_cand) >= 7:
+            return _make_result(razon_cand, nit_cand, dv_cand)
 
     # ── PRIORIDAD 4: "Retenedor : NIT-DV" (Mekano ERP — ENTREAGUAS) ─────────────
     m = _RE_RETENEDOR_NIT.search(text)
@@ -400,6 +423,10 @@ def _extract_emisor(text: str) -> tuple[str, str, str]:
             break
         m2 = _RE_BARE_NIT.match(ln)
         if m2 and len(m2.group(1)) >= 8:
+            candidate = re.sub(r"[\.,]", "", m2.group(1))
+            # Saltar números de 10 dígitos que empiezan con 3 (celulares colombianos)
+            if len(candidate) == 10 and candidate.startswith("3"):
+                continue
             nit_raw = m2.group(1)
             nit_line_idx = i
             break
@@ -421,6 +448,7 @@ def _extract_emisor(text: str) -> tuple[str, str, str]:
 
     razon = ""
     if nit_line_idx > 0:
+        city_fallback = ""
         for look_back in range(1, min(nit_line_idx + 1, 6)):
             candidate = lines[nit_line_idx - look_back]
             if _RE_NIT_DV.search(candidate) or _RE_NIT_NODV.search(candidate):
@@ -428,8 +456,19 @@ def _extract_emisor(text: str) -> tuple[str, str, str]:
                 break
             if _is_junk_line(candidate):
                 continue
+            # Saltar línea de una sola palabra en mayúsculas sin sufijo empresarial
+            # (probable ciudad o departamento), pero guardar como fallback
+            words = candidate.strip().split()
+            if (len(words) == 1
+                    and re.match(r"^[A-ZÁÉÍÓÚÑ]{3,12}$", words[0])
+                    and not re.search(r"\b(?:SAS|LTDA|S\.A\.S|S\.A\.|E\.U\.|CORP)\b", candidate, re.I)):
+                if not city_fallback:
+                    city_fallback = candidate
+                continue
             razon = candidate
             break
+        if not razon and city_fallback:
+            razon = city_fallback
     elif nit_line_idx == 0 and len(lines) > 1:
         razon = lines[1] if not _RE_NIT_NODV.search(lines[1]) else ""
 
@@ -645,10 +684,12 @@ def _extract_concepto_rows(
 def _extract_amounts(text: str, tipo_cert: str, nit_hint: str = "") -> tuple[float, float]:
     """Retorna (base, retencion). Intenta múltiples layouts."""
 
-    # 1. Línea TOTAL/TOTALES
+    # 1. Línea TOTAL/TOTALES — validar ratio para evitar 3-column layouts
     m = _RE_TOTAL_LINE.search(text)
     if m:
-        return _parse_money(m.group(1)), _parse_money(m.group(2))
+        b, r = _parse_money(m.group(1)), _parse_money(m.group(2))
+        if b > 0 and r > 0 and 0.001 < r / b < 0.35:
+            return b, r
 
     # 1b. Formato PERSEO etiqueta: "MONTO TOTAL: $X  CUANTIA: $Y"
     m_total = _RE_MONTO_TOTAL.search(text)
@@ -716,8 +757,8 @@ def _extract_amounts(text: str, tipo_cert: str, nit_hint: str = "") -> tuple[flo
         base_sum = ret_sum = 0.0
         for _conc, _tasa, base_s, ret_s in rows:
             b, r = _parse_money(base_s), _parse_money(ret_s)
-            # Filtrar falsos positivos (montos muy pequeños o iguales)
-            if b > 500 and r > 0 and b > r:
+            # Validar rango de tasa (0.1% a 30%) — evita capturar porcentaje como monto
+            if b > 500 and r > 0 and b > r and 0.001 < r / b < 0.30:
                 base_sum += b
                 ret_sum  += r
         if base_sum > 0:
@@ -767,6 +808,7 @@ def _extract_amounts(text: str, tipo_cert: str, nit_hint: str = "") -> tuple[flo
         if nit_clean:
             nit_blacklist.add(float(nit_clean))
     for pat in (
+        # NIT del retenedor (emisor del certificado)
         r"N\.?I\.?T\.?\s*[.:\s#oO]*([0-9]{6,12}|[0-9]{1,3}(?:[.,][0-9]{3})+)",
         r"NIT\s+o\s+C[eé]dula\s*[.:\s]*([0-9]{6,12}|[0-9]{1,3}(?:[.,][0-9]{3})+)",
         r"C\.?C\.?\s*[.:\s#]*([0-9]{5,12})",
@@ -774,6 +816,19 @@ def _extract_amounts(text: str, tipo_cert: str, nit_hint: str = "") -> tuple[flo
         r"[Ii]dentificaci[oó]n\s*[.:\s#]*([0-9]{6,12})",
         r"Vendor.{0,15}?Tax\s+No\.?\s*\n?([0-9]{7,12})",
         r"Nit\s+o\s+C\.C\.\s*\n([0-9]{6,12})",
+        # NIT del retenido (receptor — NO es la base sujeta a retención)
+        r"[Ii]dentificado(?:\s+con)?\s+(?:NIT\s*)?([0-9]{6,12})",
+        r"IDENTIFICACI[OÓ]N\s*[/\-]?\s*NIT\s*[:\s]*(?:CC\s+)?([0-9]{6,12})",
+        r"(?:C\.?C\.?|NIT)\s+o\s+NIT\s+([0-9]{6,12})",
+        r"[Pp]racticada?\s+[Aa]\s*:?[^\n]{0,80}\n[^\n]{0,30}([0-9]{9,10})\b",
+        r"[Rr]etenido\s+[Aa][:\s]+[^\n]{0,80}\n[^\n]{0,20}([0-9]{9,10})\b",
+        r"\bNr\.?\s*Identificaci[oó]n\s*:\s*([0-9]{7,12})",
+        # Números en formato NIT colombiano: 9-12 dígitos seguidos de guión y dígito verificador
+        r"\b([0-9]{7,12})-[0-9]\b",
+        # Teléfonos y fax — no son montos
+        r"(?:Tel[eé]fonos?|Telf?|Celular?|Fax|PBX|Móvil|Movil)[:\s.]*([0-9]{7,12})",
+        r"Tel\s+([0-9]{7,12})",
+        r"\+57\s*([0-9]{10})",
     ):
         for mt in re.finditer(pat, text, re.I):
             nit_blacklist.add(_parse_money(mt.group(1)))
