@@ -99,7 +99,7 @@ export default function ExogenasPage() {
 
   const [files, setFiles] = useState<File[]>([]);
   const [result, setResult] = useState<ProcessResult | null>(null);
-  const [tab, setTab] = useState<"analytics" | "1003" | "detalle">("analytics");
+  const [tab, setTab] = useState<"analytics" | "exogenas" | "detalle">("analytics");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -119,7 +119,8 @@ export default function ExogenasPage() {
 
   function addFiles(list: FileList | null) {
     if (!list) return;
-    const valid = Array.from(list).filter((f) => f.name.endsWith(".pdf"));
+    const VALID_EXT = /\.(pdf|jpg|jpeg|png|tiff?|bmp|webp|xlsx?|docx?)$/i;
+    const valid = Array.from(list).filter((f) => VALID_EXT.test(f.name));
     setFiles((prev) => {
       const names = new Set(prev.map((f) => f.name));
       return [...prev, ...valid.filter((f) => !names.has(f.name))];
@@ -152,7 +153,7 @@ export default function ExogenasPage() {
       true
     );
     const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = url; a.download = "taxops_exogenas_1003.xlsx"; a.click();
+    const a = document.createElement("a"); a.href = url; a.download = "taxops_exogenas.xlsx"; a.click();
     URL.revokeObjectURL(url);
   }
 
@@ -211,8 +212,8 @@ export default function ExogenasPage() {
     <div className="space-y-6 max-w-5xl">
       {/* Upload */}
       <div className="card">
-        <h2 className="font-semibold text-gray-900 mb-1">Certificados de retención en la fuente</h2>
-        <p className="text-xs text-gray-400 mb-4">Sube los PDF de certificados para generar el Formato 1003 DIAN automáticamente.</p>
+        <h2 className="font-semibold text-gray-900 mb-1">Certificados de retención · Exógenas</h2>
+        <p className="text-xs text-gray-400 mb-4">Sube certificados (PDF, imagen, Excel, Word) para generar el reporte de exógenas DIAN automáticamente.</p>
 
         <div
           className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center hover:border-brand-orange transition-colors cursor-pointer"
@@ -221,9 +222,9 @@ export default function ExogenasPage() {
           onDrop={(e) => { e.preventDefault(); addFiles(e.dataTransfer.files); }}
         >
           <Upload size={32} className="text-gray-400 mx-auto mb-2" />
-          <p className="text-sm text-gray-600 font-medium">Arrastra PDF aquí o <span className="text-brand-orange">haz clic para seleccionar</span></p>
-          <p className="text-xs text-gray-400 mt-1">Certificados de retención en la fuente (IVA y Renta)</p>
-          <input ref={fileRef} type="file" multiple accept=".pdf" className="hidden" onChange={(e) => addFiles(e.target.files)} />
+          <p className="text-sm text-gray-600 font-medium">Arrastra archivos aquí o <span className="text-brand-orange">haz clic para seleccionar</span></p>
+          <p className="text-xs text-gray-400 mt-1">PDF · JPG · PNG · Excel · Word — Retenciones de renta, IVA e ICA</p>
+          <input ref={fileRef} type="file" multiple accept=".pdf,.jpg,.jpeg,.png,.tiff,.tif,.bmp,.webp,.xlsx,.xls,.docx,.doc" className="hidden" onChange={(e) => addFiles(e.target.files)} />
         </div>
 
         {files.length > 0 && (
@@ -276,13 +277,13 @@ export default function ExogenasPage() {
           )}
 
           <button onClick={handleExport} className="btn-secondary flex items-center gap-2">
-            <Download size={16} /> Exportar Formato 1003 DIAN
+            <Download size={16} /> Exportar Exógenas DIAN
           </button>
 
           {/* Tabs */}
           <div className="card p-0 overflow-hidden">
             <div className="flex border-b border-gray-200">
-              {(["analytics", "1003", "detalle"] as const).map((t) => (
+              {(["analytics", "exogenas", "detalle"] as const).map((t) => (
                 <button
                   key={t}
                   onClick={() => setTab(t)}
@@ -291,7 +292,7 @@ export default function ExogenasPage() {
                   }`}
                 >
                   {t === "analytics" && <BarChart2 size={14} />}
-                  {t === "analytics" ? "Analítica" : t === "1003" ? "Formato 1003" : "Detalle"}
+                  {t === "analytics" ? "Analítica" : t === "exogenas" ? "Exógenas" : "Detalle"}
                 </button>
               ))}
             </div>
@@ -302,7 +303,7 @@ export default function ExogenasPage() {
                 {/* KPIs */}
                 <div className="flex flex-wrap gap-4">
                   <StatCard label="Total retenciones" value={fmt(totalRetencion)} sub={`${detalle.length} registros`} />
-                  <StatCard label="Retenedores únicos" value={String(byRetenedor.length)} sub="en Formato 1003" />
+                  <StatCard label="Retenedores únicos" value={String(byRetenedor.length)} sub="en exógenas" />
                   <StatCard label="Conceptos" value={String(byConcepto.length)} />
                   <StatCard label="Archivos procesados" value={String(result.procesados)} sub={`de ${result.total_archivos}`} />
                 </div>
@@ -338,9 +339,9 @@ export default function ExogenasPage() {
             )}
 
             {/* ── Tablas ── */}
-            {(tab === "1003" || tab === "detalle") && (
+            {(tab === "exogenas" || tab === "detalle") && (
               <div className="overflow-x-auto">
-                <DataTable rows={tab === "1003" ? f1003 : detalle} />
+                <DataTable rows={tab === "exogenas" ? f1003 : detalle} />
               </div>
             )}
           </div>

@@ -96,6 +96,17 @@ _RE_CERT_RENTA = re.compile(
     re.I,
 )
 
+# Palabras que NUNCA son ciudades colombianas
+_CIUDAD_BLACKLIST = frozenset({
+    "day", "month", "year", "fecha", "periodo", "período", "avable", "gravable",
+    "razon", "razón", "social", "nombre", "administración", "administracion",
+    "impuestos", "certifica", "certificado", "retencion", "retención",
+    "fuente", "durante", "contribuyente", "agente", "retenedor",
+    "expedicion", "expedición", "consignacion", "consignación",
+    "enero", "febrero", "marzo", "abril", "mayo", "junio",
+    "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+})
+
 # Ciudad donde se practicó la retención (acepta variantes con/sin acento)
 _RE_CIUDAD_PRACT = re.compile(
     r"ciudad\s+donde\s+se\s+[^\n:]{0,40}:([^.\n]{3,40})",
@@ -110,8 +121,16 @@ _RE_CIUDAD_CONSIG = re.compile(
     re.I,
 )
 _RE_CIUDAD_EMISOR = re.compile(r"^ciudad\s*:\s*([A-ZÁÉÍÓÚÑ][^,.\n]{2,25})", re.M | re.I)
+# "EN LA CIUDAD DE MEDELLÍN" (formato narrativo)
+_RE_CIUDAD_EN = re.compile(
+    r"en\s+la\s+ciudad\s+de\s+([A-ZÁÉÍÓÚÑ][A-Za-záéíóúñ]{2,20})", re.I
+)
+# "Lugar de expedición: CIUDAD"
+_RE_CIUDAD_LUGAR = re.compile(
+    r"(?:lugar\s+de\s+expedi[cs]i[oó]n|expedido\s+en)\s*[:\-]?\s*([A-ZÁÉÍÓÚÑ][^\n,]{2,25})", re.I
+)
 _RE_CIUDAD_FECHA = re.compile(
-    r"^([A-ZÁÉÍÓÚÑ][a-záéíóúñA-Z\s]{3,20}),?\s+\d{1,2}[\s/]\w{2,10}[\s/]\d{4}",
+    r"^([A-ZÁÉÍÓÚÑ]{3,}(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)*),?\s+\d{1,2}[\s/]\w{2,10}[\s/]\d{4}",
     re.M,
 )
 
@@ -404,10 +423,18 @@ def _extract_emisor(text: str) -> tuple[str, str, str]:
 
 def _extract_direccion(text: str) -> str:
     m = re.search(
-        r"(?:CL|CR|CRA|AK|AV|KM|VDA|CARRERA|CALLE|DIAGONAL|TRANSVERSAL|AVENIDA)[^\n]{3,60}",
+        r"(?:CL|CR|CRA|AK|AV|KM|VDA|CARRERA|CALLE|DIAGONAL|TRANSVERSAL|AVENIDA)[^\n]{3,70}",
         text, re.I,
     )
-    return m.group(0).strip() if m else ""
+    if not m:
+        return ""
+    addr = m.group(0).strip()
+    # Quitar teléfonos y texto de relleno al final
+    addr = re.sub(r"\s+(?:Tel[eé]fono|Telf?|Cel|Fax|PBX)\.?\s*[\d\s()\-+.]{6,}.*$", "", addr, flags=re.I)
+    addr = re.sub(r"\s+[-–]\s*(?:Tel[eé]fono|Tel|Cel).*$", "", addr, flags=re.I)
+    addr = re.sub(r"\s+\+?57[\s\-]?\d{7,}.*$", "", addr)  # número colombiano directo
+    addr = re.sub(r"\s+\d{7,}.*$", "", addr)               # teléfono sin prefijo
+    return addr.strip()[:80]
 
 
 # ── Persona natural — separar apellidos y nombres ────────────────────────────
@@ -595,7 +622,7 @@ def _extract_concepto_rows(
 
 # ── Extracción de montos ──────────────────────────────────────────────────────
 
-def _extract_amounts(text: str, tipo_cert: str) -> tuple[float, float]:
+def _extract_amounts(text: str, tipo_cert: str, nit_hint: str = "") -> tuple[float, float]:
     """Retorna (base, retencion). Intenta múltiples layouts."""
 
     # 1. Línea TOTAL/TOTALES
@@ -714,6 +741,11 @@ def _extract_amounts(text: str, tipo_cert: str) -> tuple[float, float]:
     # 14. Fallback numérico — construye lista negra de NITs encontrados en texto
     #     para no confundir NIT del emisor/receptor con base sujeta a retención.
     nit_blacklist: set[float] = set()
+    # Añadir el NIT conocido del emisor (pasado como hint) para evitar confusiones
+    if nit_hint:
+        nit_clean = re.sub(r"\D", "", nit_hint)
+        if nit_clean:
+            nit_blacklist.add(float(nit_clean))
     for pat in (
         r"N\.?I\.?T\.?\s*[.:\s#oO]*([0-9]{6,12}|[0-9]{1,3}(?:[.,][0-9]{3})+)",
         r"NIT\s+o\s+C[eé]dula\s*[.:\s]*([0-9]{6,12}|[0-9]{1,3}(?:[.,][0-9]{3})+)",
@@ -738,13 +770,16 @@ def _extract_amounts(text: str, tipo_cert: str) -> tuple[float, float]:
 
 # ── Ciudad de retención ───────────────────────────────────────────────────────
 
+_CIUDAD_OCR_FIXES = {
+    "MEDELLN": "MEDELLÍN", "MEDELL N": "MEDELLÍN", "BOGOT ": "BOGOTÁ",
+    "BOGOT": "BOGOTÁ", "BARRANQUILA": "BARRANQUILLA",
+}
+
 def _clean_city(raw: str) -> str:
-    """Limpia ciudad: quita prefijos de ruido y texto trailing."""
+    """Limpia ciudad: quita prefijos de ruido, valida contra blacklist."""
     city = raw.split("\n")[0].strip()
     city = re.split(r"[,;/]", city)[0].strip()
-    # Quitar prefijos como "DE:", "DE :", ": "
     city = re.sub(r"^(?:DE\s*:?\s*|:\s*)", "", city, flags=re.I).strip()
-    # Quitar frases de relleno al final
     city = re.sub(
         r"(?i)\s*\b(se expide|donde se|esta cert|ificado|art\.|decreto|d\.c\.|s\.a\.s|\|)\b.*$",
         "", city,
@@ -752,10 +787,20 @@ def _clean_city(raw: str) -> str:
     city = re.sub(r"[\._\|\-]{2,}.*$", "", city).strip()
     # Máximo 3 palabras
     words = city.split()
-    return " ".join(words[:3]) if len(words) > 3 else city
+    city = " ".join(words[:3]) if len(words) > 3 else city
+    # Correcciones OCR comunes
+    city_up = city.upper().strip()
+    city = _CIUDAD_OCR_FIXES.get(city_up, city)
+    # Validar: no es una palabra de la blacklist
+    if city.lower().strip() in _CIUDAD_BLACKLIST:
+        return ""
+    if all(w.lower() in _CIUDAD_BLACKLIST for w in city.split() if w):
+        return ""
+    return city
 
 
 def _extract_ciudad_retencion(text: str) -> str:
+    # 1. Patrones explícitos de ciudad de retención/consignación
     for pat in (_RE_CIUDAD_PRACT, _RE_CIUDAD_CONSIG):
         m = pat.search(text)
         if m:
@@ -763,17 +808,33 @@ def _extract_ciudad_retencion(text: str) -> str:
             if len(city) >= 3:
                 return city
 
-    # Línea de fecha al final: "MEDELLÍN abril 24 de 2026"
+    # 2. "en la ciudad de GIRARDOTA"
+    m = _RE_CIUDAD_EN.search(text)
+    if m:
+        city = _clean_city(m.group(1))
+        if len(city) >= 3:
+            return city
+
+    # 3. "Lugar de expedición: CIUDAD"
+    m = _RE_CIUDAD_LUGAR.search(text)
+    if m:
+        city = _clean_city(m.group(1))
+        if len(city) >= 3:
+            return city
+
+    # 4. Línea de fecha: "MEDELLÍN, 24 abril 2026" (solo palabras 100% MAYÚSCULAS)
     m = _RE_CIUDAD_FECHA.search(text)
     if m:
         city = _clean_city(m.group(1))
         if len(city) >= 3:
             return city
 
-    # Emisor's city como último recurso ("Ciudad: Sincelejo")
+    # 5. "Ciudad: Sincelejo" en encabezado del emisor
     m = _RE_CIUDAD_EMISOR.search(text)
     if m:
-        return _clean_city(m.group(1))
+        city = _clean_city(m.group(1))
+        if len(city) >= 3:
+            return city
 
     return ""
 
@@ -799,7 +860,7 @@ _MAX_PAGES = 10  # Certificados de retención no superan 10 páginas
 
 
 def _read_pdf(path: Path) -> tuple[str, bool]:
-    """Lee PDF limitando a _MAX_PAGES para no saturar RAM en Railway."""
+    """Lee PDF. Si no hay texto extraíble, intenta OCR vía pdfplumber page.to_image()."""
     parts: list[str] = []
     with pdfplumber.open(path) as pdf:
         for page in pdf.pages[:_MAX_PAGES]:
@@ -807,7 +868,27 @@ def _read_pdf(path: Path) -> tuple[str, bool]:
             if t:
                 parts.append(t)
     text = "\n".join(parts)
-    return text, not text.strip()
+    if text.strip():
+        return text, False
+    # PDF sin texto → intentar OCR renderizando cada página como imagen
+    return _ocr_pdf_pages(path)
+
+
+def _ocr_pdf_pages(path: Path) -> tuple[str, bool]:
+    """OCR sobre páginas de PDF escaneado usando pdfplumber + pytesseract."""
+    try:
+        import pytesseract
+        parts: list[str] = []
+        with pdfplumber.open(path) as pdf:
+            for page in pdf.pages[:_MAX_PAGES]:
+                img = page.to_image(resolution=200).original
+                t = pytesseract.image_to_string(img, lang="spa")
+                if t.strip():
+                    parts.append(t)
+        text = "\n".join(parts)
+        return text, not text.strip()
+    except Exception:
+        return "", True  # Tesseract no disponible o PDF corrupto
 
 
 def _read_docx(path: Path) -> tuple[str, bool]:
@@ -942,7 +1023,7 @@ def extract_many(path: "str | Path") -> list[dict]:
 
     # ICA → fila única (va a tabla separada)
     if tipo_cert == "ICA":
-        b, r = _extract_amounts(text, tipo_cert)
+        b, r = _extract_amounts(text, tipo_cert, nit_hint=nit)
         return [_make_row("ICA", 0.0, b, r)]
 
     # Intentar múltiples filas de concepto
@@ -952,7 +1033,7 @@ def extract_many(path: "str | Path") -> list[dict]:
 
     # Fallback: fila única
     concepto, porcentaje = _detect_concepto(text, tipo_cert)
-    b, r                 = _extract_amounts(text, tipo_cert)
+    b, r                 = _extract_amounts(text, tipo_cert, nit_hint=nit)
     if b == 0 and r == 0:
         base["error"] = "No se encontraron montos"
         base.update({"razon_social": razon if tipo_doc == "31" else "",
