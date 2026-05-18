@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Bell, Calendar, Download, AlertTriangle, CheckCircle, Clock, Filter, ExternalLink } from "lucide-react";
+import { Bell, Calendar, Download, AlertTriangle, CheckCircle, Clock, RefreshCw, ExternalLink } from "lucide-react";
 import { PageChatbot } from "@/components/PageChatbot";
+import { useApi } from "@/lib/api";
 
 /* ── Tipos ─────────────────────────────────────────────────────────────────── */
 type TipoEvento = "retencion" | "iva" | "renta" | "exogenas" | "ica" | "patrimonio" | "otro";
@@ -20,67 +21,7 @@ type EventoDIAN = {
   alertaDias?: number; // días antes para alertar
 };
 
-/* ── Calendario DIAN 2026 (fuente: Calendario Tributario DIAN 2026 oficial) ─── */
-// Fecha = último día del rango (NIT *9 para retención; último código para demás).
-// Cada descripción indica el rango completo por dígito de NIT.
-const EVENTOS: EventoDIAN[] = [
-  // ── ENERO 2026 (ya pasado — se incluye para historial) ────────────────────
-  { id: "r01", fecha: "2026-01-26", titulo: "Retención — diciembre 2025", descripcion: "Declaración y pago retención en la fuente diciembre 2025. Rango: 14 ene (NIT *0) al 26 ene (NIT *9).", tipo: "retencion", urgencia: "baja", articulo: "Art. 375 ET", alertaDias: 5 },
-  { id: "gc1", fecha: "2026-02-23", titulo: "Renta grandes contribuyentes — cuota 1", descripcion: "Primera cuota declaración de renta año gravable 2025 para grandes contribuyentes. Rango: 10 feb (NIT *0) al 23 feb (NIT *9).", tipo: "renta", urgencia: "critica", articulo: "Art. 562 ET", alertaDias: 15 },
-
-  // ── FEBRERO 2026 ──────────────────────────────────────────────────────────
-  { id: "r02", fecha: "2026-02-23", titulo: "Retención — enero 2026", descripcion: "Declaración y pago retención en la fuente enero 2026. Rango: 10 feb (NIT *0) al 23 feb (NIT *9).", tipo: "retencion", urgencia: "baja", articulo: "Art. 375 ET", alertaDias: 5 },
-
-  // ── MARZO 2026 ────────────────────────────────────────────────────────────
-  { id: "r03", fecha: "2026-03-24", titulo: "Retención — febrero 2026", descripcion: "Declaración y pago retención en la fuente febrero 2026. Rango: 10 mar (NIT *0) al 24 mar (NIT *9).", tipo: "retencion", urgencia: "baja", articulo: "Art. 375 ET", alertaDias: 5 },
-  { id: "iva1", fecha: "2026-03-24", titulo: "IVA bimestral — bimestre 1 (ene-feb)", descripcion: "Declaración y pago IVA bimestre enero-febrero 2026. Responsables del régimen ordinario con declaración bimestral. Rango: 10 mar al 24 mar.", tipo: "iva", urgencia: "alta", articulo: "Art. 600 ET", alertaDias: 5 },
-
-  // ── ABRIL 2026 ────────────────────────────────────────────────────────────
-  { id: "r04", fecha: "2026-04-27", titulo: "Retención — marzo 2026", descripcion: "Declaración y pago retención en la fuente marzo 2026. Rango: 13 abr (NIT *0) al 27 abr (NIT *9).", tipo: "retencion", urgencia: "baja", articulo: "Art. 375 ET", alertaDias: 5 },
-  { id: "gc2", fecha: "2026-04-27", titulo: "Renta grandes contribuyentes — cuota 2", descripcion: "Segunda cuota declaración de renta año gravable 2025 para grandes contribuyentes. Rango: 13 abr (NIT *0) al 27 abr (NIT *9).", tipo: "renta", urgencia: "alta", articulo: "Art. 562 ET", alertaDias: 10 },
-
-  // ── MAYO 2026 ─────────────────────────────────────────────────────────────
-  { id: "r05", fecha: "2026-05-26", titulo: "Retención — abril 2026", descripcion: "Declaración y pago retención en la fuente abril 2026. Rango: 12 may (NIT *0) al 26 may (NIT *9).", tipo: "retencion", urgencia: "alta", articulo: "Art. 375 ET", alertaDias: 5 },
-  { id: "iva2", fecha: "2026-05-26", titulo: "IVA bimestral — bimestre 2 (mar-abr)", descripcion: "Declaración y pago IVA bimestre marzo-abril 2026. Rango: 12 may al 26 may.", tipo: "iva", urgencia: "alta", articulo: "Art. 600 ET", alertaDias: 5 },
-  { id: "iva4a", fecha: "2026-05-26", titulo: "IVA cuatrimestral — cuatrimestre 1 (ene-abr)", descripcion: "Declaración y pago IVA cuatrimestre enero-abril 2026. Responsables con declaración cuatrimestral. Rango: 12 may al 26 may.", tipo: "iva", urgencia: "alta", articulo: "Art. 600 ET", alertaDias: 5 },
-  { id: "rj1", fecha: "2026-05-26", titulo: "Renta personas jurídicas — cuota 1", descripcion: "Primera cuota declaración de renta año gravable 2025 para personas jurídicas no grandes contribuyentes. Rango: 12 may (NIT *0) al 26 may (NIT *9).", tipo: "renta", urgencia: "critica", articulo: "Art. 240 ET", alertaDias: 10 },
-  { id: "pat1", fecha: "2026-05-26", titulo: "Impuesto al patrimonio — cuota 1", descripcion: "Primera cuota impuesto al patrimonio 2026. Rango: 12 may (NIT *0) al 26 may (NIT *9).", tipo: "patrimonio", urgencia: "alta", articulo: "Art. 292-2 ET", alertaDias: 10 },
-
-  // ── JUNIO 2026 ────────────────────────────────────────────────────────────
-  { id: "r06", fecha: "2026-06-24", titulo: "Retención — mayo 2026", descripcion: "Declaración y pago retención en la fuente mayo 2026. Rango: 10 jun (NIT *0) al 24 jun (NIT *9).", tipo: "retencion", urgencia: "alta", articulo: "Art. 375 ET", alertaDias: 5 },
-  { id: "gc3", fecha: "2026-06-24", titulo: "Renta grandes contribuyentes — cuota 3", descripcion: "Tercera cuota declaración de renta año gravable 2025 para grandes contribuyentes. Rango: 10 jun (NIT *0) al 24 jun (NIT *9).", tipo: "renta", urgencia: "critica", articulo: "Art. 562 ET", alertaDias: 10 },
-
-  // ── JULIO 2026 ────────────────────────────────────────────────────────────
-  { id: "r07", fecha: "2026-07-23", titulo: "Retención — junio 2026", descripcion: "Declaración y pago retención en la fuente junio 2026. Rango: 9 jul (NIT *0) al 23 jul (NIT *9).", tipo: "retencion", urgencia: "alta", articulo: "Art. 375 ET", alertaDias: 5 },
-  { id: "iva3", fecha: "2026-07-23", titulo: "IVA bimestral — bimestre 3 (may-jun)", descripcion: "Declaración y pago IVA bimestre mayo-junio 2026. Rango: 9 jul al 23 jul.", tipo: "iva", urgencia: "alta", articulo: "Art. 600 ET", alertaDias: 5 },
-  { id: "rj2", fecha: "2026-07-23", titulo: "Renta personas jurídicas — cuota 2", descripcion: "Segunda cuota declaración de renta año gravable 2025 para personas jurídicas no grandes contribuyentes. Rango: 9 jul (NIT *0) al 23 jul (NIT *9).", tipo: "renta", urgencia: "critica", articulo: "Art. 240 ET", alertaDias: 10 },
-
-  // ── AGOSTO 2026 ───────────────────────────────────────────────────────────
-  { id: "r08", fecha: "2026-08-26", titulo: "Retención — julio 2026", descripcion: "Declaración y pago retención en la fuente julio 2026. Rango: 12 ago (NIT *0) al 26 ago (NIT *9).", tipo: "retencion", urgencia: "alta", articulo: "Art. 375 ET", alertaDias: 5 },
-  { id: "pn0", fecha: "2026-08-12", titulo: "Renta personas naturales — inicio", descripcion: "Inicio vencimientos declaración de renta año gravable 2025 para personas naturales y asimiladas. Los plazos se escalonan por los últimos 2 dígitos del NIT: primer vencimiento 12 ago (NIT 01-09), último 23 oct (NIT 90-99).", tipo: "renta", urgencia: "media", articulo: "Art. 592 ET", alertaDias: 15 },
-
-  // ── SEPTIEMBRE 2026 ───────────────────────────────────────────────────────
-  { id: "r09", fecha: "2026-09-22", titulo: "Retención — agosto 2026", descripcion: "Declaración y pago retención en la fuente agosto 2026. Rango: 9 sep (NIT *0) al 22 sep (NIT *9).", tipo: "retencion", urgencia: "alta", articulo: "Art. 375 ET", alertaDias: 5 },
-  { id: "iva4", fecha: "2026-09-22", titulo: "IVA bimestral — bimestre 4 (jul-ago)", descripcion: "Declaración y pago IVA bimestre julio-agosto 2026. Rango: 9 sep al 22 sep.", tipo: "iva", urgencia: "alta", articulo: "Art. 600 ET", alertaDias: 5 },
-  { id: "iva4b", fecha: "2026-09-22", titulo: "IVA cuatrimestral — cuatrimestre 2 (may-ago)", descripcion: "Declaración y pago IVA cuatrimestre mayo-agosto 2026. Rango: 9 sep al 22 sep.", tipo: "iva", urgencia: "alta", articulo: "Art. 600 ET", alertaDias: 5 },
-  { id: "pat2", fecha: "2026-09-22", titulo: "Impuesto al patrimonio — cuota 2", descripcion: "Segunda cuota impuesto al patrimonio 2026. Rango: 9 sep (NIT *0) al 22 sep (NIT *9).", tipo: "patrimonio", urgencia: "alta", articulo: "Art. 292-2 ET", alertaDias: 10 },
-
-  // ── OCTUBRE 2026 ──────────────────────────────────────────────────────────
-  { id: "r10", fecha: "2026-10-23", titulo: "Retención — septiembre 2026", descripcion: "Declaración y pago retención en la fuente septiembre 2026. Rango: 9 oct (NIT *0) al 23 oct (NIT *9).", tipo: "retencion", urgencia: "alta", articulo: "Art. 375 ET", alertaDias: 5 },
-  { id: "pn9", fecha: "2026-10-23", titulo: "Renta personas naturales — cierre", descripcion: "Último vencimiento declaración de renta año gravable 2025 para personas naturales (NIT terminado en 90-99). Rango de vencimientos: 12 ago al 23 oct.", tipo: "renta", urgencia: "critica", articulo: "Art. 592 ET", alertaDias: 15 },
-
-  // ── NOVIEMBRE 2026 ────────────────────────────────────────────────────────
-  { id: "r11", fecha: "2026-11-25", titulo: "Retención — octubre 2026", descripcion: "Declaración y pago retención en la fuente octubre 2026. Rango: 11 nov (NIT *0) al 25 nov (NIT *9).", tipo: "retencion", urgencia: "alta", articulo: "Art. 375 ET", alertaDias: 5 },
-  { id: "iva5", fecha: "2026-11-25", titulo: "IVA bimestral — bimestre 5 (sep-oct)", descripcion: "Declaración y pago IVA bimestre septiembre-octubre 2026. Rango: 11 nov al 25 nov.", tipo: "iva", urgencia: "alta", articulo: "Art. 600 ET", alertaDias: 5 },
-
-  // ── DICIEMBRE 2026 ────────────────────────────────────────────────────────
-  { id: "r12", fecha: "2026-12-23", titulo: "Retención — noviembre 2026", descripcion: "Declaración y pago retención en la fuente noviembre 2026. Rango: 10 dic (NIT *0) al 23 dic (NIT *9).", tipo: "retencion", urgencia: "alta", articulo: "Art. 375 ET", alertaDias: 5 },
-  { id: "cf26", fecha: "2026-12-31", titulo: "Cierre fiscal 2026", descripcion: "Cierre del año gravable 2026. Verificar provisiones, ajustes de inventario, diferencias en cambio, conciliaciones bancarias y depreciaciones.", tipo: "otro", urgencia: "critica", alertaDias: 30 },
-
-  // ── ENERO 2027 (IVA bimestre 6 / cuatrimestre 3) ──────────────────────────
-  { id: "iva6", fecha: "2027-01-26", titulo: "IVA bimestral — bimestre 6 (nov-dic 2026)", descripcion: "Declaración y pago IVA bimestre noviembre-diciembre 2026. Rango: 13 ene 2027 al 26 ene 2027.", tipo: "iva", urgencia: "alta", articulo: "Art. 600 ET", alertaDias: 10 },
-  { id: "iva4c", fecha: "2027-01-26", titulo: "IVA cuatrimestral — cuatrimestre 3 (sep-dic 2026)", descripcion: "Declaración y pago IVA cuatrimestre septiembre-diciembre 2026. Rango: 13 ene 2027 al 26 ene 2027.", tipo: "iva", urgencia: "alta", articulo: "Art. 600 ET", alertaDias: 10 },
-];
+/* ── Tipos vacíos para estado inicial ──────────────────────────────────────── */
 
 /* ── Estilos por tipo ──────────────────────────────────────────────────────── */
 const TIPO_CONFIG: Record<TipoEvento, { label: string; bg: string; text: string; dot: string }> = {
@@ -123,12 +64,23 @@ Responde en español con referencias al ET colombiano cuando sea relevante.`;
 
 /* ══════════════════════════════════════════════════════════════════════════════ */
 export default function CalendarioPage() {
+  const [eventos, setEventos] = useState<EventoDIAN[]>([]);
+  const [cargando, setCargando] = useState(true);
   const [filtroTipo, setFiltroTipo] = useState<TipoEvento | "todos">("todos");
   const [soloProximos, setSoloProximos] = useState(true);
   const [eventoAbierto, setEventoAbierto] = useState<string | null>(null);
+  const { get } = useApi();
   const hoy = new Date().toISOString().slice(0, 10);
 
-  const eventosFiltrados = EVENTOS
+  useEffect(() => {
+    setCargando(true);
+    get<EventoDIAN[]>("/calendario/eventos")
+      .then((data) => setEventos(data))
+      .catch(() => setEventos([]))
+      .finally(() => setCargando(false));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const eventosFiltrados = eventos
     .filter((e) => filtroTipo === "todos" || e.tipo === filtroTipo)
     .filter((e) => !soloProximos || e.fecha >= hoy)
     .sort((a, b) => a.fecha.localeCompare(b.fecha));
@@ -142,7 +94,7 @@ export default function CalendarioPage() {
   }
 
   // Alertas próximas (≤ 10 días)
-  const alertas = EVENTOS.filter((e) => {
+  const alertas = eventos.filter((e) => {
     const d = diasRestantes(e.fecha);
     return d >= 0 && d <= 10;
   });
@@ -155,7 +107,7 @@ export default function CalendarioPage() {
       "X-WR-CALNAME:Calendario DIAN 2026",
       "X-WR-TIMEZONE:America/Bogota",
     ];
-    for (const e of EVENTOS) {
+    for (const e of eventos) {
       const dt = e.fecha.replace(/-/g, "");
       lines.push(
         "BEGIN:VEVENT",
@@ -173,6 +125,20 @@ export default function CalendarioPage() {
     const a = document.createElement("a");
     a.href = url; a.download = "taxops-calendario-dian-2026.ics"; a.click();
     URL.revokeObjectURL(url);
+  }
+
+  if (cargando) {
+    return (
+      <div className="max-w-5xl mx-auto space-y-4 pb-24">
+        <div className="flex items-center gap-3 text-gray-400">
+          <RefreshCw size={16} className="animate-spin" />
+          <span className="text-sm">Cargando calendario tributario…</span>
+        </div>
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="card animate-pulse h-16 bg-gray-100 dark:bg-slate-800 rounded-xl" />
+        ))}
+      </div>
+    );
   }
 
   return (
