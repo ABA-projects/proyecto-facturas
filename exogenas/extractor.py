@@ -197,6 +197,17 @@ _RE_BIMESTRE_ROSARIO = re.compile(
     re.M,
 )
 
+# Tabla bimestre ICA mes-a-mes: "Enero - Febrero  base  ret" (IND FANTASIA ICA)
+_RE_BIMESTRE_ICA = re.compile(
+    r"^[A-Za-záéíóúñÑ]+\s*[-–]\s*[A-Za-záéíóúñÑ]+\s+([\d,.]+)\s+([\d,.]+)",
+    re.M,
+)
+# Línea total ICA: "MONTO DEL PAGO SUJETO...\n base  ret" (IND FANTASIA ICA)
+_RE_ICA_MONTO_TOTAL = re.compile(
+    r"MONTO\s+DEL\s+PAGO[^\n]*\n\s*([\d,.]+)\s+([\d,.]+)",
+    re.I,
+)
+
 # SUINSUMOYA box format
 _RE_BOX_BASE = re.compile(
     r"RETENCION[^|$\n]{0,60}([\d.,]+)[^\d\n]*?([\d.,]+)",
@@ -218,14 +229,17 @@ _RE_CUANTIA = re.compile(
 _RE_RETENEDOR_NIT = re.compile(
     r"[Rr]etenedor\s*:\s*([0-9]{6,12}|[0-9]{1,3}(?:[.,][0-9]{3})+)\s*[-–]\s*([0-9])\b",
 )
-# "Agente retenedor: NOMBRE\nNIT o Cédula: X" (COMERCIALIZADORA CSF)
-_RE_AGENTE_RETENEDOR_LABEL = re.compile(r"[Aa]gente\s+retenedor\s*:\s*([^\n]{3,80})", re.I)
+# "Agente retenedor: NOMBRE" o "Agente Retenedor\t\tNOMBRE" (COMERCIALIZADORA CSF / XLS)
+_RE_AGENTE_RETENEDOR_LABEL = re.compile(
+    r"[Aa]gente\s+[Rr]etenedor\s*(?::\s*|[\t ]{2,})([^\n\t]{3,80})", re.I
+)
+# "NIT o Cédula" o "Nit ó Cédula" (con o sin acento) — también tab-separado (XLS)
 _RE_NIT_O_CEDULA = re.compile(
-    r"NIT\s+o\s+C[eé]dula\s*[:\s]+([0-9]{6,12}|[0-9]{1,3}(?:[.,][0-9]{3})+)\s*[-–]\s*([0-9])\b",
+    r"NIT\s+[oó]\s+C[eé]dula\s*[:\t\s]+([0-9]{6,12}|[0-9]{1,3}(?:[.,][0-9]{3})+)\s*[-–]\s*([0-9])\b",
     re.I,
 )
 _RE_NIT_O_CEDULA_NODV = re.compile(
-    r"NIT\s+o\s+C[eé]dula\s*[:\s]+([0-9]{6,12}|[0-9]{1,3}(?:[.,][0-9]{3})+)",
+    r"NIT\s+[oó]\s+C[eé]dula\s*[:\t\s]+([0-9]{6,12}|[0-9]{1,3}(?:[.,][0-9]{3})+)",
     re.I,
 )
 # "NIT. 900,713,526 - 7"  (PUBLIK MAGIC — miles con coma)
@@ -379,8 +393,9 @@ def _extract_emisor(text: str) -> tuple[str, str, str]:
             return _make_result(razon, nit_raw, dv)
 
     # ── PRIORIDAD 4b: tabla SAP "Nombre EMPRESA Nit: NNN - D" en una sola línea ──
+    # [^\S\n]+ en vez de \s+ evita cruzar líneas y capturar el "Retenido a"
     m = re.search(
-        r"[Nn]ombre\s+([A-ZÁÉÍÓÚÑ&][^\n]{3,60}?)\s+[Nn]it[:\s]+([0-9]{1,3}(?:[.,][0-9]{3})+|[0-9]{7,12})\s*[-–]\s*([0-9])",
+        r"[Nn]ombre[^\S\n]+([A-ZÁÉÍÓÚÑ&][^\n]{3,60}?)[^\S\n]+[Nn]it[:\s]+([0-9]{1,3}(?:[.,][0-9]{3})+|[0-9]{7,12})\s*[-–]\s*([0-9])",
         text, re.I,
     )
     if m:
@@ -622,11 +637,19 @@ def _detect_concepto(text: str, tipo_cert: str) -> tuple[str, float]:
 # ── Extracción de filas múltiples de conceptos ────────────────────────────────
 
 # Tabla "Concepto LABEL PCT%  BASE  RETENCIÓN" — múltiples filas
+# (?!\s*%) evita capturar valores como "2.500%" (porcentajes repetidos) como ret
 _RE_MULTI_ROW = re.compile(
     r"(?P<label>[A-Za-záéíóúÁÉÍÓÚñÑ][^\n\t]{2,50}?)\s+"
     r"(?P<pct>[\d]+[.,][\d]{1,4})\s*%\s+"
     r"(?P<base>[\d.,]{4,}(?:\.\d{2})?)\s+%?\s*"
-    r"(?P<ret>[\d.,]{3,})",
+    r"(?P<ret>[\d.,]{3,})(?!\s*%)",
+    re.M,
+)
+
+# Tabla "Concepto (PCT%)  num1  num2  num3  ..." — pct entre paréntesis (GASCAL)
+_RE_MULTI_ROW_PAREN_PCT = re.compile(
+    r"(?P<label>[A-Za-záéíóúÁÉÍÓÚñÑ][^\n\t(]{2,40}?)\s*\((?P<pct>[\d]+[.,][\d]{1,4})\s*%\)\s+"
+    r"(?P<rest>[^\n]+)",
     re.M,
 )
 
@@ -659,8 +682,48 @@ def _extract_concepto_rows(
         base  = _parse_money(m.group("base"))
         ret   = _parse_money(m.group("ret"))
         if base > 100 and ret > 0 and base > ret:
-            concepto = _pct_to_concepto(label, pct)
-            rows.append((concepto, pct, base, ret))
+            if 0.001 < ret / base < 0.35:
+                concepto = _pct_to_concepto(label, pct)
+                rows.append((concepto, pct, base, ret))
+            elif pct > 0:
+                # Ratio inválido pero pct conocido (tabla multi-columna tipo CUEROS VELEZ):
+                # buscar el par correcto en el área del match usando pct como guía.
+                pct_frac = pct / 100
+                area = text[m.start("base"):m.start("base") + 300]
+                area_nums = [_parse_money(n) for n in re.findall(r"[\d.,]+", area)]
+                area_nums = [n for n in area_nums if 1_000 < n < 5_000_000_000]
+                found = False
+                for i in range(len(area_nums)):
+                    for j in range(i + 1, min(i + 5, len(area_nums))):
+                        b2, r2 = area_nums[i], area_nums[j]
+                        if b2 > r2 > 100 and abs(r2 / b2 - pct_frac) < pct_frac * 0.12:
+                            concepto = _pct_to_concepto(label, pct)
+                            rows.append((concepto, pct, b2, r2))
+                            found = True
+                            break
+                    if found:
+                        break
+
+    if rows:
+        return rows
+
+    # 1b. Tabla con pct entre paréntesis: "Concepto (PCT%) num1 num2 ..." (GASCAL)
+    for m in _RE_MULTI_ROW_PAREN_PCT.finditer(text):
+        label = m.group("label").strip()
+        pct   = float(m.group("pct").replace(",", "."))
+        rest  = m.group("rest")
+        pct_frac = pct / 100
+        nums_in_row = [_parse_money(n) for n in re.findall(r"[\d.,]+", rest)]
+        nums_in_row = [n for n in nums_in_row if 1_000 < n < 5_000_000_000]
+        for i in range(len(nums_in_row)):
+            for j in range(i + 1, min(i + 5, len(nums_in_row))):
+                b2, r2 = nums_in_row[i], nums_in_row[j]
+                if b2 > r2 > 100 and abs(r2 / b2 - pct_frac) < pct_frac * 0.12:
+                    concepto = _pct_to_concepto(label, pct)
+                    rows.append((concepto, pct, b2, r2))
+                    break
+            if rows:
+                break
 
     if rows:
         return rows
@@ -691,7 +754,21 @@ def _extract_amounts(text: str, tipo_cert: str, nit_hint: str = "") -> tuple[flo
         if b > 0 and r > 0 and 0.001 < r / b < 0.35:
             return b, r
 
-    # 1b. Formato PERSEO etiqueta: "MONTO TOTAL: $X  CUANTIA: $Y"
+    # 1b. ICA — sumar filas bimestrales "Mes - Mes  base  ret" (IND FANTASIA ICA)
+    if tipo_cert == "ICA":
+        m_ica = _RE_ICA_MONTO_TOTAL.search(text)
+        if m_ica:
+            b, r = _parse_money(m_ica.group(1)), _parse_money(m_ica.group(2))
+            if b > r > 0:
+                return b, r
+        bims_ica = _RE_BIMESTRE_ICA.findall(text)
+        if bims_ica:
+            base_sum = sum(_parse_money(b) for b, _ in bims_ica)
+            ret_sum  = sum(_parse_money(r) for _, r in bims_ica)
+            if base_sum > 0:
+                return base_sum, ret_sum
+
+    # 1c. Formato PERSEO etiqueta: "MONTO TOTAL: $X  CUANTIA: $Y"
     m_total = _RE_MONTO_TOTAL.search(text)
     m_cuant  = _RE_CUANTIA.search(text)
     if m_total and m_cuant and m_total.start() < m_cuant.start():
@@ -966,9 +1043,11 @@ def _read_pdf(path: Path) -> tuple[str, bool]:
             if t:
                 parts.append(t)
     text = "\n".join(parts)
-    if text.strip():
+    # Requiere al menos 20 caracteres alfanuméricos — evita tratar PDFs escaneados
+    # que solo producen un carácter de artefacto (e.g. ")") como texto válido.
+    if len(re.sub(r"\W+", "", text)) >= 20:
         return text, False
-    # PDF sin texto → intentar OCR renderizando cada página como imagen
+    # PDF sin texto (o casi sin texto) → intentar OCR renderizando cada página como imagen
     return _ocr_pdf_pages(path)
 
 
@@ -1011,9 +1090,11 @@ def _read_excel(path: Path) -> tuple[str, bool]:
             parts: list[str] = []
             for ws in wb.sheets():
                 for row_idx in range(ws.nrows):
-                    row_txt = "\t".join(
-                        str(ws.cell_value(row_idx, col)) for col in range(ws.ncols)
-                    )
+                    def _xls_cell(v: object) -> str:
+                        if isinstance(v, float) and v == int(v):
+                            return str(int(v))
+                        return str(v) if v != "" else ""
+                    row_txt = "\t".join(_xls_cell(ws.cell_value(row_idx, col)) for col in range(ws.ncols))
                     if row_txt.strip():
                         parts.append(row_txt)
             return "\n".join(parts), False
