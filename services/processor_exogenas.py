@@ -39,6 +39,10 @@ def _agregar(df: pd.DataFrame) -> pd.DataFrame:
             razon_social     =("razon_social", "first"),
             dv               =("dv", "first"),
             tipo_doc         =("tipo_doc", "first"),
+            primer_apellido  =("primer_apellido", "first"),
+            segundo_apellido =("segundo_apellido", "first"),
+            primer_nombre    =("primer_nombre", "first"),
+            otros_nombres    =("otros_nombres", "first"),
             direccion        =("direccion", "first"),
             ciudad_retencion =("ciudad_retencion", "first"),
             cod_dpto         =("cod_dpto", "first"),
@@ -49,8 +53,11 @@ def _agregar(df: pd.DataFrame) -> pd.DataFrame:
         )
     )
 
+    # Para tipo_doc=31 limpiar campos de persona natural y viceversa
+    mask_31 = agg["tipo_doc"] == "31"
     for col in ("primer_apellido", "segundo_apellido", "primer_nombre", "otros_nombres"):
-        agg[col] = ""
+        agg.loc[mask_31, col] = ""
+    agg.loc[~mask_31, "razon_social"] = ""
 
     col_order = [
         "concepto","tipo_doc","nit","dv","primer_apellido","segundo_apellido",

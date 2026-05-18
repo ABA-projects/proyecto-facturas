@@ -191,10 +191,61 @@ _RE_CUANTIA = re.compile(
 )
 
 
+# ── Patrones adicionales de NIT por layout ───────────────────────────────────
+
+# "Retenedor : 900742492-9" (Mekano ERP — ENTREAGUAS)
+_RE_RETENEDOR_NIT = re.compile(
+    r"[Rr]etenedor\s*:\s*([0-9]{6,12}|[0-9]{1,3}(?:[.,][0-9]{3})+)\s*[-–]\s*([0-9])\b",
+)
+# "Agente retenedor: NOMBRE\nNIT o Cédula: X" (COMERCIALIZADORA CSF)
+_RE_AGENTE_RETENEDOR_LABEL = re.compile(r"[Aa]gente\s+retenedor\s*:\s*([^\n]{3,80})", re.I)
+_RE_NIT_O_CEDULA = re.compile(
+    r"NIT\s+o\s+C[eé]dula\s*[:\s]+([0-9]{6,12}|[0-9]{1,3}(?:[.,][0-9]{3})+)\s*[-–]\s*([0-9])\b",
+    re.I,
+)
+_RE_NIT_O_CEDULA_NODV = re.compile(
+    r"NIT\s+o\s+C[eé]dula\s*[:\s]+([0-9]{6,12}|[0-9]{1,3}(?:[.,][0-9]{3})+)",
+    re.I,
+)
+# "NIT. 900,713,526 - 7"  (PUBLIK MAGIC — miles con coma)
+_RE_NIT_COMMA_MILES = re.compile(
+    r"N\.?I\.?T\.?\s*[.:\s#]*([0-9]{1,3}(?:,[0-9]{3})+)\s*[-–]\s*([0-9])\b",
+    re.I,
+)
+# NIT bare con puntos en línea sola: "890.906.574-4" (COLEGIO ALEMAN)
+_RE_BARE_NIT_DOTS_DV = re.compile(r"^([0-9]{1,3}(?:\.[0-9]{3})+)[-–]([0-9])$")
+# SAP bilingüe: "Company Code Tax No. 8001974634" (EL BUCANERO)
+_RE_SAP_COMPANY_NIT = re.compile(r"Company\s+Code\s+Tax\s+No\.?\s+([0-9]{7,12})", re.I)
+_RE_SAP_COMPANY_NAME = re.compile(r"Razon\s+social\s+quien[^\n]*\n([^\n]+)", re.I)
+# "Razón Social del Agente Retenedor ... Nit o C.C." seguido en línea siguiente del dato
+_RE_AGENTE_RETENEDOR_HEADER = re.compile(
+    r"Raz[oó]n\s+Social\s+del\s+Agente\s+Retenedor[^\n]*\n([^\n]+)", re.I
+)
+# Párrafo narrativo: "suma de $RET ... base de $BASE" — [^$] permite saltos de línea
+_RE_NARRATIVO_BASE = re.compile(
+    r"suma\s+de\s+\$\s*([\d.,]+)[^$]{0,400}?base\s+de\s+\$\s*([\d.,]+)",
+    re.I | re.DOTALL,
+)
+# Formato MEDIFE/IRCC: "COD8DIG  Concepto  PCT%  PCT2  $BASE  $RET"
+_RE_MEDIFE_ROW = re.compile(
+    r"^\d{5,10}\s+[A-Za-záéíóú][^\n]{2,40}?[\d.,]+\s*%\s+[\d.,]+\s+\$\s*([\d.,]+)\s+\$\s*([\d.,]+)",
+    re.M,
+)
+# Montos entre paréntesis: "($9,396,720) ($234,918)" (PUBLIK MAGIC)
+_RE_PAREN_AMOUNTS = re.compile(
+    r"\(\$?\s*([\d.,]{4,})\)\s+\(\$?\s*([\d.,]{3,})\)",
+    re.I,
+)
+# SAP total line: "(TOTAL)... base   pct   ret"
+_RE_SAP_TOTAL = re.compile(
+    r"\(TOTAL\)[^\n]{0,80}?([\d,]{5,})\s+[\d.,]+\s+([\d,]{3,})\s*$",
+    re.M | re.I,
+)
+
 # ── NIT y Razón Social ────────────────────────────────────────────────────────
 
 def _clean_nit(raw: str) -> str:
-    """Elimina puntos de miles de un NIT: '800.233.836' → '800233836'."""
+    """Elimina puntos, comas y guiones de un NIT: '800.233.836' → '800233836'."""
     return re.sub(r"\D", "", raw)
 
 
@@ -225,34 +276,103 @@ def _is_junk_line(ln: str) -> bool:
 
 
 def _extract_emisor(text: str) -> tuple[str, str, str]:
-    """Retorna (razon_social, nit_limpio, dv). Busca el NIT del EMISOR (primeras 30 líneas)."""
+    """
+    Retorna (razon_social, nit_limpio, dv) del AGENTE RETENEDOR (quien retiene).
+    Usa detección por prioridad para manejar múltiples layouts.
+    """
+
+    def _make_result(razon: str, nit_raw: str, dv_raw: str) -> tuple[str, str, str]:
+        nit = _clean_nit(nit_raw)
+        d = dv_raw if dv_raw else (calcular_dv(nit) if nit else "")
+        razon = re.sub(r"(?i)(agente\s+retenedor|razón?\s+social|nombre\s+comercial|empresa)[:\s]*", "", razon).strip()
+        razon = re.sub(r"[\|_\-]{2,}", "", razon).strip()
+        return (razon if len(razon) >= 3 else ""), nit, d
+
+    # ── PRIORIDAD 1: SAP bilingüe "Company Code Tax No." (EL BUCANERO) ─────────
+    # El NIT aparece al FINAL de la línea siguiente a "Company Code Tax No."
+    m = re.search(r"Company\s+Code\s+Tax\s+No\.?[^\n]*\n([^\n]+)", text, re.I)
+    if m:
+        next_line = m.group(1).strip()
+        nit_m = re.search(r"(\d{7,12})\s*$", next_line)
+        if nit_m:
+            nit_raw = nit_m.group(1)
+            razon = next_line[:nit_m.start()].strip()
+            return _make_result(razon, nit_raw, "")
+
+    # ── PRIORIDAD 2: "Razón Social del Agente Retenedor" sección (MEDIFE) ──────
+    m = _RE_AGENTE_RETENEDOR_HEADER.search(text)
+    if m:
+        row_line = m.group(1).strip()
+        # La línea tiene: RazonSocial  Dirección  NIT (sin guión, al final)
+        nit_m = re.search(r"(\d{6,12})\s*[-–]?\s*(\d?)\s*$", row_line)
+        if nit_m:
+            nit_raw = nit_m.group(1)
+            dv = nit_m.group(2) or ""
+            razon = row_line[:nit_m.start()].strip()
+            # Quitar dirección (empieza con Cra, Cl, Av, etc.)
+            razon = re.split(r"\s{2,}|(?:Cra|Cll|Cl\b|Cr\b|AV|KM|CR)\s", razon, flags=re.I)[0].strip()
+            return _make_result(razon, nit_raw, dv)
+
+    # ── PRIORIDAD 3: "Agente retenedor: NOMBRE" + NIT en línea siguiente ────────
+    m = _RE_AGENTE_RETENEDOR_LABEL.search(text)
+    if m:
+        razon = m.group(1).strip()
+        snippet = text[m.end():m.end() + 400]
+        nm = (_RE_NIT_O_CEDULA.search(snippet)
+              or _RE_NIT_COMMA_MILES.search(snippet)
+              or _RE_NIT_DV.search(snippet)
+              or _RE_NIT_O_CEDULA_NODV.search(snippet)
+              or _RE_NIT_NODV.search(snippet))
+        if nm:
+            nit_raw = nm.group(1)
+            dv = nm.group(2) if nm.lastindex and nm.lastindex >= 2 else ""
+            return _make_result(razon, nit_raw, dv)
+
+    # ── PRIORIDAD 4: "Retenedor : NIT-DV" (Mekano ERP — ENTREAGUAS) ─────────────
+    m = _RE_RETENEDOR_NIT.search(text)
+    if m:
+        nit_raw, dv = m.group(1), m.group(2)
+        prev = text[:m.start()]
+        prev_lines = [l.strip() for l in prev.split("\n") if l.strip()]
+        razon = ""
+        for ln in reversed(prev_lines[-5:]):
+            if _is_junk_line(ln):
+                continue
+            # "Agente NOMBRE" → quitar prefijo "Agente"
+            razon = re.sub(r"^[Aa]gente\s+", "", ln).strip()
+            break
+        return _make_result(razon, nit_raw, dv)
+
+    # ── PRIORIDAD 5: lógica original (bare NIT + etiqueta NIT) ──────────────────
     lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
     nit_raw = dv = ""
     nit_line_idx = -1
 
-    # Prioridad 1: NIT bare en primeras 8 líneas (formato IRCC: Company\nNIT-DV\nAddr)
     for i, ln in enumerate(lines[:8]):
-        m = _RE_BARE_NIT_DV.match(ln)
-        if m:
-            nit_raw, dv = m.group(1), m.group(2)
+        m2 = _RE_BARE_NIT_DOTS_DV.match(ln)
+        if m2:
+            nit_raw, dv = m2.group(1), m2.group(2)
             nit_line_idx = i
             break
-        m = _RE_BARE_NIT.match(ln)
-        if m and len(m.group(1)) >= 8:
-            nit_raw = m.group(1)
+        m2 = _RE_BARE_NIT_DV.match(ln)
+        if m2:
+            nit_raw, dv = m2.group(1), m2.group(2)
+            nit_line_idx = i
+            break
+        m2 = _RE_BARE_NIT.match(ln)
+        if m2 and len(m2.group(1)) >= 8:
+            nit_raw = m2.group(1)
             nit_line_idx = i
             break
 
     if not nit_raw:
         for i, ln in enumerate(lines[:30]):
-            m = _RE_NIT_DV.search(ln)
-            if m:
-                nit_raw, dv = m.group(1), m.group(2)
-                nit_line_idx = i
-                break
-            m = _RE_NIT_NODV.search(ln)
-            if m:
-                nit_raw = m.group(1)
+            m2 = (_RE_NIT_COMMA_MILES.search(ln)
+                  or _RE_NIT_DV.search(ln)
+                  or _RE_NIT_NODV.search(ln))
+            if m2:
+                nit_raw = m2.group(1)
+                dv = m2.group(2) if m2.lastindex and m2.lastindex >= 2 else ""
                 nit_line_idx = i
                 break
 
@@ -262,11 +382,9 @@ def _extract_emisor(text: str) -> tuple[str, str, str]:
 
     razon = ""
     if nit_line_idx > 0:
-        # Buscar hacia atrás la primera línea válida (saltando paginación, direcciones, etc.)
         for look_back in range(1, min(nit_line_idx + 1, 6)):
             candidate = lines[nit_line_idx - look_back]
             if _RE_NIT_DV.search(candidate) or _RE_NIT_NODV.search(candidate):
-                # El NIT está en la misma línea que la razón social
                 razon = re.split(r"N\.?I\.?T", candidate, flags=re.I)[0].strip()
                 break
             if _is_junk_line(candidate):
@@ -276,21 +394,12 @@ def _extract_emisor(text: str) -> tuple[str, str, str]:
     elif nit_line_idx == 0 and len(lines) > 1:
         razon = lines[1] if not _RE_NIT_NODV.search(lines[1]) else ""
 
-    # Intentar etiqueta "Razón Social:" si la razon extraída es pobre
     if len(razon) < 3:
-        m_rs = _RE_RAZON_LABEL.search(text[:800])
-        if m_rs:
-            razon = m_rs.group(1).strip()
+        m2 = _RE_RAZON_LABEL.search(text[:800])
+        if m2:
+            razon = m2.group(1).strip()
 
-    # Limpiar prefijos comunes
-    razon = re.sub(
-        r"(?i)(agente\s+retenedor|razón?\s+social|nombre\s+comercial|empresa)[:\s]*", "", razon
-    ).strip()
-    razon = re.sub(r"[\|_\-]{2,}", "", razon).strip()
-    if len(razon) < 3:
-        razon = ""
-
-    return razon, nit_clean, dv
+    return _make_result(razon, nit_raw if nit_raw else "", dv)
 
 
 def _extract_direccion(text: str) -> str:
@@ -299,6 +408,32 @@ def _extract_direccion(text: str) -> str:
         text, re.I,
     )
     return m.group(0).strip() if m else ""
+
+
+# ── Persona natural — separar apellidos y nombres ────────────────────────────
+
+def _split_persona_natural(full_name: str) -> tuple[str, str, str, str]:
+    """
+    Para tipo_doc='13', intenta separar apellidos y nombres.
+    Convención DIAN: Apellido1 Apellido2 Nombre1 OtrosNombres.
+    Heurística: si >= 4 tokens → últimos 2 = apellidos, primeros = nombres.
+    """
+    # Si hay "/" separando nombre comercial del nombre real, tomar la primera parte
+    clean = re.split(r"\s*/\s*", full_name)[0].strip()
+    # Quitar sufijos como "E.U.", "S.A.S." (no son nombres de persona)
+    clean = re.sub(r"\b(?:E\.U\.|S\.A\.S\.?|S\.A\.|LTDA\.?|S\.C\.S\.?)\s*$", "", clean, flags=re.I).strip()
+    tokens = clean.split()
+    if not tokens:
+        return "", "", "", ""
+    if len(tokens) == 1:
+        return tokens[0], "", "", ""
+    if len(tokens) == 2:
+        # Podría ser "NombreApellido" o "ApellidoNombre" — asumimos Apellido Nombre
+        return tokens[0], "", tokens[1], ""
+    if len(tokens) == 3:
+        return tokens[0], tokens[1], tokens[2], ""
+    # 4+ tokens: últimos 2 = apellidos, primeros = nombres (convención DIAN)
+    return tokens[-2], tokens[-1], tokens[0], " ".join(tokens[1:-2])
 
 
 # ── Tipo de certificado ───────────────────────────────────────────────────────
@@ -318,22 +453,46 @@ def _cert_type(text: str) -> str:
     return "RENTA"
 
 
-# ── Concepto 1003 ─────────────────────────────────────────────────────────────
+# ── Concepto 1003 — todos los conceptos DIAN Formato 1003 ───────────────────
 
-# Conceptos 1303 (servicios) — tasas 1%, 3.5%, 4%, 6% según Art. 392 ET
-_TASAS_SERVICIOS = {1.0, 1.5, 2.0, 3.5, 4.0, 6.0, 10.0, 11.0}
-_TASAS_COMPRAS   = {0.5, 1.0, 1.5, 2.5, 3.0, 3.5}  # compras puede ser 2.5%
-
-# Mapa de palabras clave de concepto → código DIAN
+# Mapa ordenado por especificidad (más específico primero)
 _CONCEPTO_MAP = [
-    # servicios (1303) — orden específico antes de compras
-    (re.compile(r"HONORARIOS|HONORARIO", re.I),                   "1303"),
-    (re.compile(r"SERVICIOS?\b", re.I),                           "1303"),
-    (re.compile(r"ARRENDAMIENTO|RENTA\s+DE\s+BIEN", re.I),        "1303"),
-    (re.compile(r"COMISIONES?", re.I),                            "1303"),
-    # compras / general (1302)
-    (re.compile(r"COMPRAS?|COMPRA\s+GENERAL", re.I),              "1302"),
-    (re.compile(r"VENTAS?", re.I),                                 "1302"),
+    # 1301: Salarios y pagos laborales
+    (re.compile(r"SALARIOS?|SUELDOS?|PAGOS?\s+LABORALES?|LIQUIDACI[OÓ]N\s+LABORAL|NOMINA", re.I), "1301"),
+    # 1304: Honorarios (antes de servicios para evitar solapamiento)
+    (re.compile(r"HONORARIOS?", re.I), "1304"),
+    # 1305: Comisiones
+    (re.compile(r"COMISIONES?", re.I), "1305"),
+    # 1307: Arrendamientos
+    (re.compile(r"ARRENDAMIENTOS?|RENTA\s+DE\s+BIEN(?:ES)?|CANON\s+DE\s+ARRENDAMIENTO", re.I), "1307"),
+    # 1306: Intereses y rendimientos financieros
+    (re.compile(r"INTERESES?|RENDIMIENTOS?\s+FINANCIEROS?|RENDIMIENTO\s+FINANCIERO", re.I), "1306"),
+    # 1308: Regalías
+    (re.compile(r"REGAL[IÍ]AS?|PROPIEDAD\s+INTELECTUAL|DERECHOS?\s+DE\s+AUTOR", re.I), "1308"),
+    # 1310: Dividendos y participaciones
+    (re.compile(r"DIVIDENDOS?|PARTICIPACIONES?", re.I), "1310"),
+    # 1311: Enajenación de activos fijos
+    (re.compile(r"ENAJENACI[OÓ]N|ACTIVOS?\s+FIJOS?|VENTA\s+DE\s+ACTIVOS?", re.I), "1311"),
+    # 1312: Pagos tarjetas débito/crédito
+    (re.compile(r"TARJETAS?\s+(?:D[EÉ]BITO|CR[EÉ]DITO)|INGRESOS?\s+DE\s+TARJETAS?", re.I), "1312"),
+    # 1313: Loterías, rifas, apuestas
+    (re.compile(r"LOTER[IÍ]AS?|RIFAS?|APUESTAS?|JUEGOS?\s+DE\s+AZAR", re.I), "1313"),
+    # 1314: Contratos de construcción
+    (re.compile(r"CONSTRUCCI[OÓ]N|URBANIZACI[OÓ]N|OBRA\s+(?:CIVIL|PUBLICA)", re.I), "1314"),
+    # 1315: Pagos al exterior
+    (re.compile(r"(?:PAGOS?\s+)?AL\s+EXTERIOR|REMESAS?|GIROS?\s+AL\s+EXTERIOR", re.I), "1315"),
+    # 1316: Títulos de renta fija
+    (re.compile(r"T[IÍ]TULOS?\s+(?:DE\s+)?RENTA\s+FIJA|BONOS?\s+DE\s+DEUDA", re.I), "1316"),
+    # 1317: Trabajadores independientes
+    (re.compile(r"TRABAJADORES?\s+INDEPENDIENTES?|CONTRATISTAS?\s+INDEPENDIENTES?", re.I), "1317"),
+    # 1303: Servicios generales (después de los más específicos)
+    (re.compile(r"SERVICIOS?\b", re.I), "1303"),
+    # SAP bilingüe — W-INC Purchase → 1302, W-INC Services → 1303
+    (re.compile(r"W-INC\s+Purch|Purch\.other\s+income", re.I), "1302"),
+    (re.compile(r"W-INC\s+Serv", re.I), "1303"),
+    # 1302: Compras (al final como más general)
+    (re.compile(r"COMPRAS?\b|COMPRA\s+GENERAL|COMPRAS?\s+GENERALES?", re.I), "1302"),
+    (re.compile(r"VENTAS?\b", re.I), "1302"),
 ]
 
 
@@ -342,27 +501,34 @@ def _pct_to_concepto(keyword: str, pct: float) -> str:
     for pattern, code in _CONCEPTO_MAP:
         if pattern.search(keyword):
             return code
-    # Si la tasa es típica de servicios (>= 3.5%), prefiere 1303
-    if pct in _TASAS_SERVICIOS and pct >= 3.5:
+    # Fallback por tasa: >=3.5% generalmente servicios/honorarios
+    if pct >= 3.5:
         return "1303"
     return "1302"
 
 
+# Porcentajes por defecto si no se detecta tasa en el texto
+_PCT_DEFAULT = {
+    "1301": 0.0, "1302": 2.5, "1303": 4.0, "1304": 10.0, "1305": 11.0,
+    "1306": 7.0, "1307": 3.5, "1308": 3.5, "1309": 15.0, "1310": 0.0,
+    "1311": 1.0, "1312": 1.5, "1313": 20.0, "1314": 2.0, "1315": 0.0,
+    "1316": 4.0, "1317": 2.0, "ICA": 0.0,
+}
+
+
 def _detect_concepto(text: str, tipo_cert: str) -> tuple[str, float]:
-    """Retorna (concepto_1003, porcentaje). concepto: '1302','1303','1309','ICA'."""
+    """Retorna (concepto_1003, porcentaje)."""
     if tipo_cert == "ICA":
         return "ICA", 0.0
     if tipo_cert == "IVA":
         return "1309", 15.0
 
-    # Buscar porcentaje explícito
     pct_m = re.search(r"(\d+[.,]\d+)\s*%", text)
     pct = float(pct_m.group(1).replace(",", ".")) if pct_m else 0.0
 
-    # Detectar palabra clave de concepto en el texto
     for pattern, code in _CONCEPTO_MAP:
         if pattern.search(text):
-            return code, pct if pct else (4.0 if code == "1303" else 2.5)
+            return code, pct if pct else _PCT_DEFAULT.get(code, 2.5)
 
     return "1302", pct if pct else 2.5
 
@@ -418,7 +584,8 @@ def _extract_concepto_rows(
         label = m.group("label").strip()
         base  = _parse_money(m.group("base"))
         ret   = _parse_money(m.group("ret"))
-        if base > 100 and ret > 0 and base > ret:
+        # Validación de ratio para evitar confundir montos y porcentajes
+        if base > 500 and ret > 0 and base > ret and 0.003 < ret / base < 0.30:
             concepto = _pct_to_concepto(label, 0.0)
             pct = round(ret / base * 100, 2) if base else 0.0
             rows.append((concepto, pct, base, ret))
@@ -516,12 +683,54 @@ def _extract_amounts(text: str, tipo_cert: str) -> tuple[float, float]:
         if b > r > 0:
             return b, r
 
-    # 10. Fallback numérico: buscar dos montos grandes consecutivos con ratio ~2-15%
+    # 10. Formato MEDIFE/IRCC: código_concepto + label + % + pct2 + $BASE + $RET
+    m = _RE_MEDIFE_ROW.search(text)
+    if m:
+        b, r = _parse_money(m.group(1)), _parse_money(m.group(2))
+        if b > r > 0 and 0.003 < r / b < 0.30:
+            return b, r
+
+    # 11. Párrafo narrativo "La suma de $RET ... base de $BASE" (PROMOCIONES PUBLICITARIAS)
+    m = _RE_NARRATIVO_BASE.search(text)
+    if m:
+        r, b = _parse_money(m.group(1)), _parse_money(m.group(2))
+        if b > r > 0:
+            return b, r
+
+    # 12. Montos entre paréntesis "($9,396,720) ($234,918)" (PUBLIK MAGIC)
+    m = _RE_PAREN_AMOUNTS.search(text)
+    if m:
+        b, r = _parse_money(m.group(1)), _parse_money(m.group(2))
+        if b > r > 0 and 0.003 < r / b < 0.30:
+            return b, r
+
+    # 13. SAP total line "(TOTAL)... base  pct  ret" (EL BUCANERO)
+    m = _RE_SAP_TOTAL.search(text)
+    if m:
+        b, r = _parse_money(m.group(1)), _parse_money(m.group(2))
+        if b > r > 0:
+            return b, r
+
+    # 14. Fallback numérico — construye lista negra de NITs encontrados en texto
+    #     para no confundir NIT del emisor/receptor con base sujeta a retención.
+    nit_blacklist: set[float] = set()
+    for pat in (
+        r"N\.?I\.?T\.?\s*[.:\s#oO]*([0-9]{6,12}|[0-9]{1,3}(?:[.,][0-9]{3})+)",
+        r"NIT\s+o\s+C[eé]dula\s*[.:\s]*([0-9]{6,12}|[0-9]{1,3}(?:[.,][0-9]{3})+)",
+        r"C\.?C\.?\s*[.:\s#]*([0-9]{5,12})",
+        r"[Rr]etenedor\s*[.:\s#]*([0-9]{6,12})",
+        r"[Ii]dentificaci[oó]n\s*[.:\s#]*([0-9]{6,12})",
+        r"Vendor.{0,15}?Tax\s+No\.?\s*\n?([0-9]{7,12})",
+        r"Nit\s+o\s+C\.C\.\s*\n([0-9]{6,12})",
+    ):
+        for mt in re.finditer(pat, text, re.I):
+            nit_blacklist.add(_parse_money(mt.group(1)))
+
     nums = [_parse_money(n) for n in re.findall(r"[\d.,]{5,}", text)]
-    candidates = [n for n in nums if n > 1000]
+    candidates = [n for n in nums if 1_000 < n < 50_000_000_000 and n not in nit_blacklist]
     for i in range(len(candidates) - 1):
         b, r = candidates[i], candidates[i + 1]
-        if b > r > 0 and 0.005 < r / b < 0.25:
+        if b > r > 0 and 0.003 < r / b < 0.25:
             return b, r
 
     return 0.0, 0.0
@@ -575,9 +784,12 @@ def _base_row(path: Path, error: str = "") -> dict:
     """Dict base con todos los campos requeridos."""
     return {
         "razon_social": "", "nit": "", "dv": "", "tipo_doc": "31",
+        # Persona natural (tipo_doc=13)
+        "primer_apellido": "", "segundo_apellido": "",
+        "primer_nombre": "", "otros_nombres": "",
         "direccion": "", "ciudad_retencion": "", "concepto": "", "base": 0.0,
         "retencion": 0.0, "porcentaje": 0.0, "tipo_cert": "",
-        "validacion_tasa": 0.0,  # retencion/base × 100 para verificar
+        "validacion_tasa": 0.0,
         "es_escaneado": False,
         "fuente": "PDF", "archivo": path.name, "error": error,
     }
@@ -683,10 +895,16 @@ def extract_many(path: "str | Path") -> list[dict]:
         base["es_escaneado"] = True
         return [base]
 
-    tipo_cert             = _cert_type(text)
-    razon, nit, dv        = _extract_emisor(text)
-    ciudad                = _extract_ciudad_retencion(text)
-    direccion             = _extract_direccion(text)
+    tipo_cert      = _cert_type(text)
+    razon, nit, dv = _extract_emisor(text)
+    ciudad         = _extract_ciudad_retencion(text)
+    direccion      = _extract_direccion(text)
+    tipo_doc       = _tipo_doc(nit)
+
+    # Para persona natural (tipo_doc=13) extraer apellidos y nombres
+    ap1 = ap2 = nom1 = otros = ""
+    if tipo_doc == "13" and razon:
+        ap1, ap2, nom1, otros = _split_persona_natural(razon)
 
     suf = path.suffix.lower()
     _fuente_map = {
@@ -700,22 +918,26 @@ def extract_many(path: "str | Path") -> list[dict]:
     def _make_row(concepto: str, porcentaje: float, b: float, r: float) -> dict:
         tasa_calc = round(r / b * 100, 2) if b else 0.0
         return {
-            "razon_social":     razon,
-            "nit":              nit,
-            "dv":               dv,
-            "tipo_doc":         _tipo_doc(nit),
-            "direccion":        direccion,
-            "ciudad_retencion": ciudad,
-            "concepto":         concepto,
-            "base":             b,
-            "retencion":        r,
-            "porcentaje":       porcentaje,
-            "validacion_tasa":  tasa_calc,
-            "es_escaneado":     False,
-            "tipo_cert":        tipo_cert,
-            "fuente":           fuente,
-            "archivo":          path.name,
-            "error":            "",
+            "razon_social":      razon if tipo_doc == "31" else "",
+            "nit":               nit,
+            "dv":                dv,
+            "tipo_doc":          tipo_doc,
+            "primer_apellido":   ap1,
+            "segundo_apellido":  ap2,
+            "primer_nombre":     nom1,
+            "otros_nombres":     otros,
+            "direccion":         direccion,
+            "ciudad_retencion":  ciudad,
+            "concepto":          concepto,
+            "base":              b,
+            "retencion":         r,
+            "porcentaje":        porcentaje,
+            "validacion_tasa":   tasa_calc,
+            "es_escaneado":      False,
+            "tipo_cert":         tipo_cert,
+            "fuente":            fuente,
+            "archivo":           path.name,
+            "error":             "",
         }
 
     # ICA → fila única (va a tabla separada)
@@ -729,15 +951,15 @@ def extract_many(path: "str | Path") -> list[dict]:
         return [_make_row(concepto, pct, b, r) for concepto, pct, b, r in multi]
 
     # Fallback: fila única
-    concepto, porcentaje  = _detect_concepto(text, tipo_cert)
-    b, r                  = _extract_amounts(text, tipo_cert)
+    concepto, porcentaje = _detect_concepto(text, tipo_cert)
+    b, r                 = _extract_amounts(text, tipo_cert)
     if b == 0 and r == 0:
         base["error"] = "No se encontraron montos"
-        base["razon_social"] = razon
-        base["nit"] = nit
-        base["dv"] = dv
-        base["ciudad_retencion"] = ciudad
-        base["tipo_cert"] = tipo_cert
+        base.update({"razon_social": razon if tipo_doc == "31" else "",
+                     "nit": nit, "dv": dv, "tipo_doc": tipo_doc,
+                     "primer_apellido": ap1, "segundo_apellido": ap2,
+                     "primer_nombre": nom1, "otros_nombres": otros,
+                     "ciudad_retencion": ciudad, "tipo_cert": tipo_cert})
         return [base]
     return [_make_row(concepto, porcentaje, b, r)]
 
