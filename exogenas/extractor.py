@@ -1018,7 +1018,7 @@ def _read_excel(path: Path) -> tuple[str, bool]:
                         parts.append(row_txt)
             return "\n".join(parts), False
         except ImportError:
-            raise RuntimeError("xlrd no instalado. Ejecuta: pip install xlrd")
+            raise RuntimeError("Formato .xls no soportado en este entorno. Convierte el archivo a .xlsx e inténtalo de nuevo.")
     import openpyxl
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
     parts: list[str] = []
