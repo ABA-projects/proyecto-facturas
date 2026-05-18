@@ -24,7 +24,12 @@ class ResultadoExogenas:
 
 def _agregar(df: pd.DataFrame) -> pd.DataFrame:
     """Agrupa por (nit, concepto), suma base y retención."""
-    df_clean = df[df["concepto"] != "ICA"].copy()
+    df_clean = df[
+        (df["concepto"] != "ICA") &
+        (df["nit"].fillna("").astype(str).str.strip() != "") &
+        (df["concepto"].fillna("").astype(str).str.strip() != "") &
+        (df["base"].fillna(0) > 0)
+    ].copy()
     if df_clean.empty:
         return pd.DataFrame(columns=[
             "concepto","tipo_doc","nit","dv","primer_apellido","segundo_apellido",

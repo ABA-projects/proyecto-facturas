@@ -131,9 +131,32 @@ _RE_CIUDAD_EN = re.compile(
 _RE_CIUDAD_LUGAR = re.compile(
     r"(?:lugar\s+de\s+expedi[cs]i[oó]n|expedido\s+en)\s*[:\-]?\s*([A-ZÁÉÍÓÚÑ][^\n,]{2,25})", re.I
 )
+_MESES_PAT = (
+    r"(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto"
+    r"|septiembre|octubre|noviembre|diciembre)"
+)
+# "Medellín, 12 de enero de 2025" o "MEDELLÍN, 12 ENERO 2025"
 _RE_CIUDAD_FECHA = re.compile(
-    r"^([A-ZÁÉÍÓÚÑ]{3,}(?:\s+[A-ZÁÉÍÓÚÑ]{2,})*),?\s+\d{1,2}[\s/]\w{2,10}[\s/]\d{4}",
-    re.M,
+    r"^([A-ZÁÉÍÓÚÑ][A-Za-záéíóúüñÑÁÉÍÓÚÜ]+(?:\s+[A-ZÁÉÍÓÚÜÑ][A-Za-záéíóúüñÑÁÉÍÓÚÜ]+)?)"
+    r"\s*,\s*\d{1,2}\s+(?:de\s+)?" + _MESES_PAT,
+    re.M | re.I,
+)
+# "Medellín, Enero 12 de 2025"
+_RE_CIUDAD_FECHA2 = re.compile(
+    r"^([A-ZÁÉÍÓÚÑ][A-Za-záéíóúüñÑÁÉÍÓÚÜ]+(?:\s+[A-ZÁÉÍÓÚÜÑ][A-Za-záéíóúüñÑÁÉÍÓÚÜ]+)?)"
+    r"\s*,\s*" + _MESES_PAT + r"\s+\d{1,2}",
+    re.M | re.I,
+)
+# "practicada/o en Medellín" o "practicada en la ciudad de Medellín"
+_RE_CIUDAD_PRACTICADA = re.compile(
+    r"practicad[ao]\s+en\s+(?:(?:la\s+ciudad|el\s+municipio)\s+de\s+)?"
+    r"([A-ZÁÉÍÓÚÑ][A-Za-záéíóúüñÑÁÉÍÓÚÜ]+(?:\s+[A-ZÁÉÍÓÚÜÑ][A-Za-záéíóúüñÑÁÉÍÓÚÜ]+)?)",
+    re.I,
+)
+# "municipio de Sabaneta" o "en el municipio de Itagüí"
+_RE_CIUDAD_MUNICIPIO = re.compile(
+    r"municipio\s+de\s+([A-ZÁÉÍÓÚÑ][A-Za-záéíóúüñÑÁÉÍÓÚÜ]+(?:\s+[A-ZÁÉÍÓÚÜÑ][A-Za-záéíóúüñÑÁÉÍÓÚÜ]+)?)",
+    re.I,
 )
 
 # Línea TOTAL / TOTALES con dos montos
@@ -976,28 +999,43 @@ def _extract_ciudad_retencion(text: str) -> str:
             if len(city) >= 3:
                 return city
 
-    # 2. "en la ciudad de GIRARDOTA"
+    # 2. "practicada/o en Medellín"
+    m = _RE_CIUDAD_PRACTICADA.search(text)
+    if m:
+        city = _clean_city(m.group(1))
+        if len(city) >= 3:
+            return city
+
+    # 3. "en la ciudad de GIRARDOTA"
     m = _RE_CIUDAD_EN.search(text)
     if m:
         city = _clean_city(m.group(1))
         if len(city) >= 3:
             return city
 
-    # 3. "Lugar de expedición: CIUDAD"
+    # 4. "Lugar de expedición: CIUDAD"
     m = _RE_CIUDAD_LUGAR.search(text)
     if m:
         city = _clean_city(m.group(1))
         if len(city) >= 3:
             return city
 
-    # 4. Línea de fecha: "MEDELLÍN, 24 abril 2026" (solo palabras 100% MAYÚSCULAS)
-    m = _RE_CIUDAD_FECHA.search(text)
+    # 5. "municipio de Sabaneta"
+    m = _RE_CIUDAD_MUNICIPIO.search(text)
     if m:
         city = _clean_city(m.group(1))
         if len(city) >= 3:
             return city
 
-    # 5. "Ciudad: Sincelejo" en encabezado del emisor
+    # 6. Línea de fecha: "Medellín, 12 de enero de 2025" o "MEDELLÍN, 12 ENERO 2025"
+    for pat in (_RE_CIUDAD_FECHA, _RE_CIUDAD_FECHA2):
+        m = pat.search(text)
+        if m:
+            city = _clean_city(m.group(1))
+            if len(city) >= 3:
+                return city
+
+    # 7. "Ciudad: Sincelejo" en encabezado del emisor
     m = _RE_CIUDAD_EMISOR.search(text)
     if m:
         city = _clean_city(m.group(1))
