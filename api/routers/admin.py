@@ -1026,7 +1026,7 @@ async def list_invitations(admin: dict = Depends(require_admin)) -> list[InviteR
 
 
 @router.delete("/invitations/{invite_id}", status_code=204)
-async def revoke_invitation(invite_id: str, admin: dict = Depends(require_admin)) -> None:
+async def revoke_invitation(invite_id: str, admin: dict = Depends(require_admin)):
     get_db = _get_db()
     with get_db() as db:
         db.execute(
