@@ -1150,21 +1150,64 @@ def _read_excel(path: Path) -> tuple[str, bool]:
     return "\n".join(parts), False
 
 
+def _preprocess_for_ocr(img: "Image.Image") -> list["Image.Image"]:
+    """
+    Genera variantes de preprocesamiento para mejorar el OCR en imágenes
+    de baja calidad (texto muy claro, baja iluminación, foto de documento).
+    """
+    from PIL import Image, ImageEnhance, ImageOps
+    variants: list[Image.Image] = []
+
+    # Asegurar escala mínima 1600px en el eje largo para buena resolución
+    w, h = img.size
+    long_side = max(w, h)
+    scale = max(2, 1600 // long_side) if long_side < 1600 else 1
+    if scale > 1:
+        img = img.resize((w * scale, h * scale), Image.LANCZOS)
+
+    gray = img.convert("L")
+
+    # 1. Autocontraste + contraste 3× (fondo muy claro / texto muy débil)
+    ac = ImageOps.autocontrast(gray, cutoff=2)
+    ac3 = ImageEnhance.Contrast(ac).enhance(3.0)
+    variants.append(ac3)
+
+    # 2. Binarización tras autocontraste (umbral 160 después del estiramiento)
+    bw = ac3.point(lambda x: 0 if x < 160 else 255, "L")
+    variants.append(bw)
+
+    # 3. Original escalado (fallback)
+    variants.append(gray)
+
+    return variants
+
+
 def _read_image(path: Path) -> tuple[str, bool]:
-    """OCR sobre imagen (JPG/PNG/TIFF) con pytesseract — requiere Tesseract en el sistema."""
+    """
+    OCR sobre imagen (JPG/PNG/TIFF) con pytesseract.
+    Intenta múltiples preprocesados y devuelve el que extrae más texto.
+    """
     try:
         from PIL import Image
         import pytesseract
     except ImportError:
         return "", True  # sin pytesseract → tratar como escaneado
 
-    img = Image.open(path)
-    # Escala 2× para mejorar precisión en documentos pequeños
-    w, h = img.size
-    img = img.resize((w * 2, h * 2), Image.LANCZOS)
-    text = pytesseract.image_to_string(img, lang="spa")
+    img = Image.open(path).convert("RGB")
+    variants = _preprocess_for_ocr(img)
     img.close()
-    return text, not text.strip()
+
+    best = ""
+    configs = ["--oem 3 --psm 6", "--oem 3 --psm 11"]
+    for variant in variants:
+        for cfg in configs:
+            try:
+                t = pytesseract.image_to_string(variant, lang="spa", config=cfg)
+            except Exception:
+                continue
+            if len(re.sub(r"\W+", "", t)) > len(re.sub(r"\W+", "", best)):
+                best = t
+    return best, not best.strip()
 
 
 def _read_text(path: Path) -> tuple[str, bool]:
