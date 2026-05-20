@@ -96,6 +96,7 @@ def procesar_exogenas(
         try:
             rows = extract_many(p)
             for row in rows:
+                row["_archivo"] = Path(p).name
                 if row.get("error"):
                     errores += 1
                     advertencias.append(f"⚠️ {Path(p).name}: {row['error']}")
@@ -126,6 +127,30 @@ def procesar_exogenas(
     df["cod_mpio"] = mpio_df["cod_mpio"]
 
     ica_count = int((df["concepto"] == "ICA").sum())
+
+    # Detectar filas que serán excluidas del Formato 1003 por datos incompletos
+    mask_incompletas = (
+        (df["concepto"].fillna("").astype(str).str.strip() == "") |
+        (df["nit"].fillna("").astype(str).str.strip() == "") |
+        (df["base"].fillna(0) <= 0)
+    ) & (df["concepto"].fillna("") != "ICA")
+    df_incompletas = df[mask_incompletas]
+    if not df_incompletas.empty:
+        for archivo, grupo in df_incompletas.groupby("_archivo"):
+            for _, fila in grupo.iterrows():
+                motivos = []
+                if not str(fila.get("nit", "")).strip():
+                    motivos.append("NIT vacío")
+                if not str(fila.get("concepto", "")).strip():
+                    motivos.append("concepto vacío")
+                if not (fila.get("base") or 0) > 0:
+                    motivos.append("base=0")
+                advertencias.append(
+                    f"⚠️ {archivo}: fila excluida del Formato 1003 "
+                    f"({', '.join(motivos)}) — "
+                    f"retenedor: '{fila.get('razon_social','') or fila.get('nit','') or '?'}'"
+                )
+
     df_1003 = _agregar(df)
 
     # Advertir filas sin municipio detectado
