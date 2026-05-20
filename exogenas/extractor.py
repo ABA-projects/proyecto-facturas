@@ -18,6 +18,9 @@ def _parse_money(s: str) -> float:
     s = re.sub(r"[\$\(\)\s]", "", str(s)).strip()
     if not s:
         return 0.0
+    # Rechazar fechas: "25.12.31", "2025.12.31", "31/12/2025", "31-12-25"
+    if re.match(r"^\d{2,4}[.\-/]\d{1,2}[.\-/]\d{2,4}$", s):
+        return 0.0
     dot_count   = s.count(".")
     comma_count = s.count(",")
 
@@ -68,6 +71,23 @@ def calcular_dv(nit: str) -> str:
 
 def _tipo_doc(nit: str) -> str:
     return "31" if len(re.sub(r"\D", "", nit)) >= 9 else "13"
+
+
+def _tipo_doc_from_context(nit: str, text: str) -> str:
+    """Determina tipo_doc buscando el label explícito antes del NIT en el texto."""
+    digits = re.sub(r"\D", "", nit)
+    if not digits:
+        return "31"
+    # Buscar la posición del NIT en el texto
+    pos = text.find(digits[:9])
+    if pos > 0:
+        context = text[max(0, pos - 150): pos + 20]
+        if re.search(r"\bC\.?C\.?\b|\bc[eé]dula\b|\bidentificaci[oó]n\b", context, re.I):
+            if not re.search(r"\bN\.?I\.?T\.?\b", context[-60:], re.I):
+                return "13"
+        if re.search(r"\bN\.?I\.?T\.?\b", context, re.I):
+            return "31"
+    return _tipo_doc(nit)
 
 
 # ── Regex patterns ────────────────────────────────────────────────────────────
@@ -159,9 +179,10 @@ _RE_CIUDAD_MUNICIPIO = re.compile(
     re.I,
 )
 
-# Línea TOTAL / TOTALES con dos montos
+# Línea TOTAL / TOTALES — hasta 3 columnas (base | pct% opcional | retención)
 _RE_TOTAL_LINE = re.compile(
-    r"^TOTAL(?:ES|S)?\s*(?:[A-Za-záéíóúñ\s]{0,25}?)\s*[:\-]?\s*[\-\$\s]*([\d.,]+)\s+[\-\$\s]*([\d.,]+)",
+    r"^TOTAL(?:ES|S)?\s*(?:[A-Za-záéíóúñ\s]{0,25}?)\s*[:\-]?\s*"
+    r"[\-\$\s]*([\d.,]+)\s+[\-\$\s]*([\d.,]+)(?:\s+[\-\$\s]*([\d.,]+))?",
     re.M | re.I,
 )
 
@@ -243,6 +264,15 @@ _RE_MONTO_TOTAL = re.compile(
 )
 _RE_CUANTIA = re.compile(
     r"(?:CUANTIA(?:\s+DE\s+LA\s+RETENCION)?|VALOR\s+RETENID[OA]|VALOR\s+TOTAL)[:\s]*\$?\s*([\d.,]+)", re.I
+)
+# Formato minimalista: "BASE GRAVABLE: $X" / "RETENCIÓN EN LA FUENTE: $Y"
+_RE_BASE_LABEL = re.compile(
+    r"(?:BASE\s+(?:GRAVABLE|SUJETA(?:\s+A\s+RETENCI[OÓ]N)?|DE\s+RETENCI[OÓ]N|IMPONIBLE)?|VALOR\s+BASE|MONTO\s+BASE)[:\s]*\$?\s*([\d.,]+)",
+    re.I,
+)
+_RE_RET_LABEL = re.compile(
+    r"(?:RETENCI[OÓ]N(?:\s+EN\s+LA\s+FUENTE)?|RETEFUENTE|RTE\.?\s*(?:FTE\.?|FUENTE|RENTA)?|VALOR\s+RETENI[DO]|CUANT[IÍ]A(?:\s+RETENI[DA])?)[:\s]*\$?\s*([\d.,]+)",
+    re.I,
 )
 
 
@@ -379,12 +409,28 @@ def _extract_emisor(text: str) -> tuple[str, str, str]:
         m = re.search(_sap_pat, text, re.I)
         if m:
             next_line = m.group(1).strip()
+            # NIT al final de la línea (layout RENTA)
             nit_m = re.search(r"(\d{7,12})\s*$", next_line)
             if nit_m:
                 nit_raw = nit_m.group(1)
                 razon = next_line[:nit_m.start()].strip()
                 return _make_result(razon, nit_raw, "")
-            break
+            # NIT en cualquier posición de la línea (layout IVA u otras variantes)
+            nit_m = re.search(r"(\d{7,12})", next_line)
+            if nit_m:
+                nit_raw = nit_m.group(1)
+                razon = next_line[:nit_m.start()].strip()
+                if not razon:
+                    # Buscar nombre en líneas anteriores al header SAP
+                    prev_lines = [l.strip() for l in text[:m.start()].split("\n") if l.strip()]
+                    for ln in reversed(prev_lines[-5:]):
+                        if not _is_junk_line(ln):
+                            razon = ln
+                            break
+                return _make_result(razon, nit_raw, "")
+            # Header SAP encontrado pero sin NIT reconocible: NO hacer break,
+            # dejar que las prioridades siguientes intenten extraer
+    # (no break aquí — continuar con prioridades 2..5 si SAP no sirvió)
 
     # ── PRIORIDAD 2: "Razón Social del Agente Retenedor" sección (MEDIFE) ──────
     m = _RE_AGENTE_RETENEDOR_HEADER.search(text)
@@ -497,16 +543,28 @@ def _extract_emisor(text: str) -> tuple[str, str, str]:
             # Saltar línea de una sola palabra en mayúsculas sin sufijo empresarial
             # (probable ciudad o departamento), pero guardar como fallback
             words = candidate.strip().split()
-            if (len(words) == 1
-                    and re.match(r"^[A-ZÁÉÍÓÚÑ]{3,12}$", words[0])
-                    and not re.search(r"\b(?:SAS|LTDA|S\.A\.S|S\.A\.|E\.U\.|CORP)\b", candidate, re.I)):
+            is_single_caps = (
+                len(words) == 1
+                and re.match(r"^[A-ZÁÉÍÓÚÑ]{3,15}$", words[0])
+                and not re.search(r"\b(?:SAS|LTDA|S\.A\.S|S\.A\.|E\.U\.|CORP)\b", candidate, re.I)
+            )
+            if is_single_caps:
+                if not city_fallback:
+                    city_fallback = candidate
+                continue
+            # Verificar si el candidato multipalabra es un municipio conocido
+            cod_dpto, _ = buscar_municipio(candidate.strip())
+            if cod_dpto:
                 if not city_fallback:
                     city_fallback = candidate
                 continue
             razon = candidate
             break
         if not razon and city_fallback:
-            razon = city_fallback
+            # Usar city_fallback solo si NO es un municipio conocido
+            cod_dpto, _ = buscar_municipio(city_fallback.strip())
+            if not cod_dpto:
+                razon = city_fallback
     elif nit_line_idx == 0 and len(lines) > 1:
         razon = lines[1] if not _RE_NIT_NODV.search(lines[1]) else ""
 
@@ -770,12 +828,25 @@ def _extract_concepto_rows(
 def _extract_amounts(text: str, tipo_cert: str, nit_hint: str = "") -> tuple[float, float]:
     """Retorna (base, retencion). Intenta múltiples layouts."""
 
-    # 1. Línea TOTAL/TOTALES — validar ratio para evitar 3-column layouts
+    # 1. Línea TOTAL/TOTALES — hasta 3 columnas: base | [pct%] | retención
     m = _RE_TOTAL_LINE.search(text)
     if m:
-        b, r = _parse_money(m.group(1)), _parse_money(m.group(2))
-        if b > 0 and r > 0 and 0.001 < r / b < 0.35:
-            return b, r
+        n1 = _parse_money(m.group(1))
+        n2 = _parse_money(m.group(2))
+        n3 = _parse_money(m.group(3)) if m.group(3) else 0.0
+        # Si hay 3 números y n2 parece porcentaje (ratio n2/n1 < 0.001 ó n2 ≤ 100),
+        # usar (n1, n3) en lugar de (n1, n2)
+        if n1 > 0 and n3 > 0 and (n2 <= 100 or n2 / n1 < 0.001) and 0.001 < n3 / n1 < 0.35:
+            b, r = n1, n3
+        else:
+            b, r = n1, n2
+        if b > 0 and r > 0:
+            if tipo_cert == "ICA":
+                # ICA: tasas 0.3%–2%, bases reales > 10.000 COP
+                if b > 10_000 and r > 100 and 0.001 < r / b < 0.025:
+                    return b, r
+            elif 0.001 < r / b < 0.35:
+                return b, r
 
     # 1b. ICA — sumar filas bimestrales "Mes - Mes  base  ret" (IND FANTASIA ICA)
     if tipo_cert == "ICA":
@@ -899,7 +970,16 @@ def _extract_amounts(text: str, tipo_cert: str, nit_hint: str = "") -> tuple[flo
         if b > r > 0:
             return b, r
 
-    # 14. Fallback numérico — construye lista negra de NITs encontrados en texto
+    # 14. Formato minimalista etiquetado: "BASE GRAVABLE: X" + "RETENCIÓN: Y"
+    m_base = _RE_BASE_LABEL.search(text)
+    m_ret  = _RE_RET_LABEL.search(text)
+    if m_base and m_ret:
+        b = _parse_money(m_base.group(1))
+        r = _parse_money(m_ret.group(1))
+        if b > r > 0 and 0.001 < r / b < 0.35:
+            return b, r
+
+    # 15. Fallback numérico — construye lista negra de NITs encontrados en texto
     #     para no confundir NIT del emisor/receptor con base sujeta a retención.
     nit_blacklist: set[float] = set()
     # Añadir el NIT conocido del emisor (pasado como hint) para evitar confusiones
@@ -1255,7 +1335,7 @@ def extract_many(path: "str | Path") -> list[dict]:
     razon, nit, dv = _extract_emisor(text)
     ciudad         = _extract_ciudad_retencion(text)
     direccion      = _extract_direccion(text)
-    tipo_doc       = _tipo_doc(nit)
+    tipo_doc       = _tipo_doc_from_context(nit, text)
 
     # Para persona natural (tipo_doc=13) extraer apellidos y nombres
     ap1 = ap2 = nom1 = otros = ""
