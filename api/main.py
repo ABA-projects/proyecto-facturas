@@ -1,4 +1,4 @@
-"""TaxOps FastAPI — entry point.
+"""TaxOps FastAPI — entry point.  # 2026-05-20
 
 Estructura de imports:
   - api/ → este directorio (routers, schemas, dependencies, core/)
