@@ -33,8 +33,8 @@ async function tryRefresh(): Promise<string | null> {
 
 async function handleResponse<T>(res: Response, blob = false): Promise<T> {
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail ?? "Error desconocido");
+    const err = await res.json().catch(() => ({ detail: res.statusText || "Error de conexión" }));
+    throw new Error(err.detail || `Error ${res.status}`);
   }
   if (blob) return (await res.blob()) as unknown as T;
   return res.json() as Promise<T>;
