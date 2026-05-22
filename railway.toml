@@ -9,8 +9,7 @@ dockerfilePath = "api/Dockerfile-api"
 [deploy]
 healthcheckPath = "/health"
 healthcheckTimeout = 30
-restartPolicyType = "on_failure"
-restartPolicyMaxRetries = 3
+restartPolicyType = "never"
 
 # Variables no-secretas que van bien en el repo
 # Las secretas (DATABASE_URL, SECRET_KEY, GROQ_API_KEY) van solo en Railway dashboard
