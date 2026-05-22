@@ -49,7 +49,10 @@ def _run_migrations() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    _run_migrations()
+    import threading
+    # Ejecutar migraciones en background para no bloquear el healthcheck en
+    # modo serverless (Railway Develop). El servidor arranca inmediatamente.
+    threading.Thread(target=_run_migrations, daemon=True).start()
     yield
 
 
