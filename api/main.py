@@ -58,7 +58,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="TaxOps API",
-    version="2.0.0",
+    version="2.0.1",
     description="API REST para automatización contable colombiana · Facturas DIAN · Exógenas · IA",
     docs_url="/docs",
     redoc_url="/redoc",
@@ -88,7 +88,7 @@ async def health() -> dict:
 
     return {
         "status": "ok",
-        "version": "2.0.0",
+        "version": "2.0.1",
         "db": "connected" if db_available() else "unavailable",
     }
 
